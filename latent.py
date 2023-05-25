@@ -20,7 +20,7 @@ class LatentInterpolation:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "interpolate"
-    CATEGORY = "EternalKernelNodes"
+    CATEGORY = "ETK/Latent"
 
     def interpolate(self, latent1, latent2, t):
         # Ensure that the latents are dictionaries

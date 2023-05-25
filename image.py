@@ -1,12 +1,17 @@
-import comfy.samplers
-import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
-import PIL.Image
+try:
+    import comfy.samplers
+    import deactivated_custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
+    from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
+        SaveImage
+    from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
+except ImportError as e:
+    print("comfy.samplers not found, skipping comfyui")
+    print(e)
+    SaveImage = None
+
 import torch
 import torchvision
 import PIL.Image as Image
-from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, SaveImage
-from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
-import doctest
 
 try:
     import folder_paths
@@ -107,7 +112,7 @@ class TinyTxtToImg:
             }
         }
 
-    CATEGORY = "EternalKernelNodes"
+    CATEGORY = "ETK"
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "tinytxt2img"
@@ -186,36 +191,37 @@ class TinyTxtToImg:
         return (image,)
 
 
-class PreviewImageTest(SaveImage):
-    def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
-        self.type = "temp"
+if SaveImage != None:
+    class PreviewImageTest(SaveImage):
+        def __init__(self):
+            self.output_dir = folder_paths.get_temp_directory()
+            self.type = "temp"
 
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-            "required": {
-                "images": ("IMAGE",),
-            },
-            "optional": {
-                "prompt": ("STRING", {"multiline": True}),
-                "neg_prompt": ("STRING", {"multiline": True}),
-                "clip_encoder": (["comfy -ignore below", "advanced"],),
-                "token_normalization": (["none", "mean", "length", "length+mean"],),
-                "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],)
-            },
-        }
+        @classmethod
+        def INPUT_TYPES(s):
+            return {
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+                "required": {
+                    "images": ("IMAGE",),
+                },
+                "optional": {
+                    "prompt": ("STRING", {"multiline": True}),
+                    "neg_prompt": ("STRING", {"multiline": True}),
+                    "clip_encoder": (["comfy -ignore below", "advanced"],),
+                    "token_normalization": (["none", "mean", "length", "length+mean"],),
+                    "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],)
+                },
+            }
 
-    def myfunc(self, images, prompt=None, extra_pnginfo=None, ret=None):
-        return ret
+        def myfunc(self, images, prompt=None, extra_pnginfo=None, ret=None):
+            return ret
 
-    CATEGORY = "image"
+        CATEGORY = "ETK/image"
 
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **kwargs):
-        ret = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
-        my_ret = self.myfunc(images, prompt, extra_pnginfo, ret)
-        return my_ret
+        def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **kwargs):
+            ret = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
+            my_ret = self.myfunc(images, prompt, extra_pnginfo, ret)
+            return my_ret
 
 
 class ExecWidget:
@@ -296,7 +302,7 @@ class LoadImage:
                     {"image": (sorted(os.listdir(input_dir)),)},
                 }
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     RETURN_TYPES = ("IMAGE", "MASK", "IMAGE")
     FUNCTION = "load_image_handler"
@@ -427,7 +433,7 @@ class SelectFromRGBSimilarity:
             }
         }
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     RETURN_TYPES = ("IMAGE",)
 
@@ -511,7 +517,7 @@ class Quantize:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "quantize"
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     def quantize(self, image: torch.Tensor, colors: int = 256):
         """
@@ -576,8 +582,7 @@ class select_from_batch:
                     "min": 0,
                     "max": 100,
                     "step": 1
-                }),}
-
+                }), }
 
             ,
             "optional": {
@@ -586,14 +591,13 @@ class select_from_batch:
             },
         }
 
+    CATEGORY = "ETK/image"
 
-    CATEGORY = "image"
-
-    RETURN_TYPES = ("IMAGE","LATENT",)
+    RETURN_TYPES = ("IMAGE", "LATENT",)
 
     FUNCTION = "select_from_batch"
 
-    def select_from_batch(self, index=0, image=None,latent=None):
+    def select_from_batch(self, index=0, image=None, latent=None):
         """
         >>> image = torch.rand((1, 512, 512,3))
         >>> index = 0
@@ -611,16 +615,15 @@ class select_from_batch:
         o_lat_dict = {}
         if image is None:
             print(latent["samples"].shape)
-            smpls=latent["samples"][index:index+1,:,:,:].expand(1, -1, -1, -1).clone()
+            smpls = latent["samples"][index:index + 1, :, :, :].expand(1, -1, -1, -1).clone()
             o_lat_dict["samples"] = smpls
             olat = o_lat_dict
             print(olat["samples"].shape)
         else:
-            oimg = image[index:index+1,:,:,:].clone()
+            oimg = image[index:index + 1, :, :, :].clone()
             print(oimg.shape)
 
-
-        return (oimg,olat,)
+        return (oimg, olat,)
 
 
 class ImageDistanceMask:
@@ -663,14 +666,13 @@ class ImageDistanceMask:
             }
         }
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     RETURN_TYPES = ("IMAGE",)
 
     FUNCTION = "distance_mask_image"
 
     def distance_mask_image(self, image, x, y, falloff_method=None, Z=1, aspect_ratio=1.0):
-        import torch.nn.functional as F
         B, H, W, C = image.shape
 
         # Create a meshgrid for the coordinates
@@ -760,7 +762,7 @@ class rgba_lower_clip:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "rgba_lower_clip"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
+    CATEGORY = "ETK/image"
 
     def rgba_lower_clip(self, image: torch.Tensor, nrm_after, r, g, b, a):
         # image is (B,W,H,C)
@@ -831,7 +833,7 @@ class rgba_upper_clip:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "rgba_upper_clip"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
+    CATEGORY = "ETK/image"
 
     def rgba_upper_clip(self, image: torch.Tensor, nrm_after, r, g, b, a):
         # image is (B,W,H,C)
@@ -894,7 +896,7 @@ class RGBA_MOD:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "rgba_mod"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
+    CATEGORY = "ETK/image"
 
     def rgba_mod(self, image: torch.Tensor, r, g, b, a):
         """simply multiply the RGBA values by the sliders
@@ -942,12 +944,7 @@ class ImageBC:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "image_b_c"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
-
-    import torch
-
-    import torch
-    import torchvision
+    CATEGORY = "ETK/image"
 
     def image_b_c(self, image, contrast, brightness):
         """
@@ -1019,7 +1016,7 @@ class PadToMatch:
     RETURN_TYPES = ("IMAGE", "IMAGE")
     FUNCTION = "padme"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
+    CATEGORY = "ETK/image"
 
     def padme(self, image1, image2, im2_x_center, im2_y_center):
         """
@@ -1087,7 +1084,7 @@ class StackImages:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "stackme"
 
-    CATEGORY = "EternalKernelNodes/postprocessing"
+    CATEGORY = "ETK/image"
 
     def stackme(self, image1, image2=None, number_of_images=2):
         """
@@ -1128,7 +1125,7 @@ class rgba_merge:
             }
         }
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     RETURN_TYPES = ("IMAGE",)
 
@@ -1149,7 +1146,7 @@ class rgba_split:
             }
         }
 
-    CATEGORY = "image"
+    CATEGORY = "ETK/image"
 
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "IMAGE")
 
