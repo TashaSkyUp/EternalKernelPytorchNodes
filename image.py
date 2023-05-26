@@ -5,8 +5,7 @@ try:
         SaveImage
     from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
 except ImportError as e:
-    print("comfy.samplers not found, skipping comfyui")
-    print(e)
+    print("ETK> comfy.samplers not found, skipping comfyui")
     SaveImage = None
 
 import torch
@@ -263,11 +262,15 @@ class ExecWidget:
         # globals().update(new_locals)
         # locals().update(new_locals)
         # print(globals())
-        out_str = new_locals.get("out_str", None)
+        out_string = new_locals.get("out_string", None)
         out_image = new_locals.get("out_image", None)
         out_float = new_locals.get("out_float", None)
-        return (out_str, out_image, out_float,)
-
+        return (out_string, out_image, out_float,)
+    @classmethod
+    def IS_CHANGED(s, name):
+        m = hashlib.sha256()
+        m.update(name)
+        return m.digest().hex()
 
 class PromptTemplate:
     """replaces the text in the given text string with a given other text at some key positions"""

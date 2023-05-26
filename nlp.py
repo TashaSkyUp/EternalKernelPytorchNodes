@@ -43,7 +43,6 @@ class SimpleTextWidget:
         return {"required":
             {
                 "text": ("STRING", {"multiline": True}),
-                "Display": ("SERVER_STRING", {"multiline": True}),
             },
 
         }
@@ -52,7 +51,7 @@ class SimpleTextWidget:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "handler"
 
-    def handler(self, text,Display):
+    def handler(self, text):
         ret = self.func(text)
         return (ret,)
 
@@ -79,6 +78,16 @@ avoid numpy and PIL as much as possible
 class LLMCompletion(SimpleTextWidget):
     """uses the input text to call the specified LLM model and returns the output string"""
 
+    def __init__(self):
+        self.func = self.OAI_completion
+        super().__init__(self.func)
+        import uuid
+        self.SSID = str(uuid.uuid4())
+
+        from main import server_obj_holder
+        self.server_string = server_obj_holder[0]["server_strings"]
+        self.server_string[self.SSID] = "empty"
+
     def OAI_completion(self, text):
         out_message = [{"role": "user", "content": text}]
 
@@ -87,19 +96,8 @@ class LLMCompletion(SimpleTextWidget):
             messages=out_message
         )
         gpt_message = response["choices"][0]["message"]["content"].strip()
-        self.server_strings[self.SSID] = gpt_message
+        self.server_string[self.SSID] = gpt_message
         return gpt_message
-
-    def __init__(self):
-        self.func = self.OAI_completion
-        super().__init__(self.func)
-        import uuid
-        self.SSID = str(uuid.uuid4())
-        from main import server_obj_holder
-        self.server_strings = server_obj_holder[0].server_strings
-        self.server_strings["self.SSID"] = "empty"
-
-
 
 
 LLMCompletion.register("LLM_Completion")

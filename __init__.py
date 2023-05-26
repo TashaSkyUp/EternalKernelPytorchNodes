@@ -6,7 +6,7 @@ try:
     use_generic_nodes = False
 except:
     use_generic_nodes = True
-    print("Failed to import comfy.samplers, assuming no comfyui skipping SD related nodes")
+    print("ETK> Failed to import comfy.samplers, assuming no comfyui skipping SD related nodes")
 
 from custom_nodes.EternalKernelLiteGraphNodes.latent import LatentInterpolation
 from custom_nodes.EternalKernelLiteGraphNodes.image  import PadToMatch
