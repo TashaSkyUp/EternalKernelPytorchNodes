@@ -231,8 +231,9 @@ class ExecWidget:
         return {"optional":
             {
                 "text_to_eval": ("STRING", {"multiline": True}),
-                "image1": ("IMAGE", {"multiline": False}),
-                "float1": ("FLOAT", {"multiline": False}),
+                "image1_in": ("IMAGE", {"multiline": False}),
+                "float1_in": ("FLOAT", {"multiline": False}),
+                "string1_in": ("STRING", {"multiline": False}),
 
             },
             "required": {
@@ -246,31 +247,39 @@ class ExecWidget:
     RETURN_TYPES = ("STRING", "IMAGE", "FLOAT")
     FUNCTION = "exec_handler"
 
-    def exec_handler(self, text_to_eval, image1: torch.Tensor = None, float1: float = 0.0, name: str = "exec_func"):
+    def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
+                     name: str = "exec_func"):
         """
         >>> ExecWidget().exec_handler("2 + 3")
         '5'
         """
         result = None
-        if image1 is not None:
-            image_in = image1.clone()
+        if image1_in is not None:
+            image_in = image1_in.clone()
         else:
             image_in = None
-        new_locals = {"float_out": float1, "image_in": image_in}
+
+        new_locals = {"float_out": float1_in,
+                      "image_out": image_in,
+                      "string_out": string1_in,
+                      }
         exec(text_to_eval, globals(), new_locals)
+
         # merge new_locals into globals
         # globals().update(new_locals)
         # locals().update(new_locals)
         # print(globals())
-        out_string = new_locals.get("out_string", None)
-        out_image = new_locals.get("out_image", None)
-        out_float = new_locals.get("out_float", None)
+        out_string = new_locals.get("string_out", None)
+        out_image = new_locals.get("image_out", None)
+        out_float = new_locals.get("float_out", None)
         return (out_string, out_image, out_float,)
+
     @classmethod
     def IS_CHANGED(s, name):
         m = hashlib.sha256()
         m.update(name)
         return m.digest().hex()
+
 
 class PromptTemplate:
     """replaces the text in the given text string with a given other text at some key positions"""
