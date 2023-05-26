@@ -27,7 +27,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
 
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
 
-from custom_nodes.EternalKernelLiteGraphNodes.nlp import NODE_CLASS_MAPPINGS as NLP_NODE_CLASS_MAPPINGS
+from custom_nodes.SWAIN.nlp import NODE_CLASS_MAPPINGS as NLP_NODE_CLASS_MAPPINGS
 
 
 
