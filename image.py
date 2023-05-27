@@ -1,6 +1,6 @@
 try:
     import comfy.samplers
-    import deactivated_custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
+    #import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
     from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
         SaveImage
     from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
