@@ -275,9 +275,10 @@ class ExecWidget:
         return (out_string, out_image, out_float,)
 
     @classmethod
-    def IS_CHANGED(s, name):
+    def IS_CHANGED(s,  text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
+                     name: str = "exec_func"):
         m = hashlib.sha256()
-        m.update(name)
+        m.update(name.encode("utf-8"))
         return m.digest().hex()
 
 
