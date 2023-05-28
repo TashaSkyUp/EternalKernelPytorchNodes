@@ -24,12 +24,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import SelectFromRGBSimilari
 from custom_nodes.EternalKernelLiteGraphNodes.image import LoadImage
 from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
 from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
-
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
-
-
-
-
 
 
 if use_generic_nodes:
@@ -76,3 +71,5 @@ else:
     NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_COMFY)
 
 
+from custom_nodes.EternalKernelLiteGraphNodes.video import NODE_CLASS_MAPPINGS as NODE_CLASS_MAPPINGS_VIDEO
+NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_VIDEO)
