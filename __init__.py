@@ -27,7 +27,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
 
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
 
-from custom_nodes.SWAIN.nlp import NODE_CLASS_MAPPINGS as NLP_NODE_CLASS_MAPPINGS
+
 
 
 
@@ -75,5 +75,4 @@ else:
     }
     NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_COMFY)
 
-for k, v in NLP_NODE_CLASS_MAPPINGS.items():
-    NODE_CLASS_MAPPINGS[k] = v
+
