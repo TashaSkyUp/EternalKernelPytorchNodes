@@ -178,12 +178,20 @@ class VideoFramesToImageStack(VideoFolderToImage, metaclass=WidgetMetaclass):
         Return slices of time from the video, sequences of images, defined by the start, stop and step
         - torch tensors (T,H,W,C)
         """
+        import glob
+
         folder_in_path = os.path.join(self.input_dir, folder_in)
         image_list = []
 
+        # List and sort all PNG or JPG files in the folder
+        file_fps = sorted(glob.glob(os.path.join(folder_in_path, '*.png')) + glob.glob(os.path.join(folder_in_path, '*.jpg')))
+
+        # Ensure the slice doesn't go beyond the end of the file list
+        if idx_slice_stop+idx > len(file_fps):
+            idx_slice_stop = len(file_fps) - idx
+
         for i in range(idx_slice_start+idx, idx_slice_stop+idx, slice_idx_step):
-            file_fps = [os.path.join(folder_in_path, f"frame{i+ii}.jpg") for ii in range(slice_idx_step)]
-            for fn in file_fps:
+            for fn in file_fps[i:i+slice_idx_step]:
                 image = cv2.imread(fn)
                 if image is not None:
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # converting to RGB format
@@ -192,10 +200,7 @@ class VideoFramesToImageStack(VideoFolderToImage, metaclass=WidgetMetaclass):
         # Convert list of images to tensor (T,H,W,C)
         tensor = torch.stack([torch.tensor(img,dtype=torch.float32) for img in image_list])
         tensor=tensor/255.0
-
-
         return (tensor,)
-
 
 class VideoFileToImageStack(VideoFileToImage, metaclass=WidgetMetaclass):
     """Use cv2 to open a video and save the videos individual frames"""

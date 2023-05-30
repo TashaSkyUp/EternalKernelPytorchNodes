@@ -1187,6 +1187,36 @@ class rgba_merge:
 
     FUNCTION = "merge"
 
+    def merge(self, r, g, b, a):
+        """
+        r,g,b,a all may be 3, 1, or 4 channel images
+        >>> image = torch.rand((1, 512, 512,3))
+        >>> r, g, b, a = rgba_split.split(None,image)
+        >>> rgba_merge.merge(None,r,g,b,a).shape
+        torch.Size([1, 512, 512, 4])
+        :param r:
+        :param g:
+        :param b:
+        :param a:
+        :return:
+        """
+        # use channel 0 of each channel in the resulting image
+        r = r[:, :, :, 0:1]
+        g = g[:, :, :, 0:1]
+        b = b[:, :, :, 0:1]
+        a = a[:, :, :, 0:1]
+
+        # there will always be an alpha channel so just put the channels together
+
+        return (torch.cat((r, g, b, a), dim=3),)
+
+
+
+
+
+
+
+
 
 class rgba_split:
     """splits the channels of an RGBA image"""
