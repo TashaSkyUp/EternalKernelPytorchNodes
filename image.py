@@ -1,9 +1,10 @@
 try:
     import comfy.samplers
-    #import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
+    # import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
     from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
         SaveImage
     from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
+    from nodes import common_ksampler
 except ImportError as e:
     print("ETK> comfy.samplers not found, skipping comfyui")
     SaveImage = None
@@ -107,19 +108,21 @@ class TinyTxtToImg:
                                     "default": "tinytxt2img"}
                          ),
                 "overrides": ("STRING", {"multiline": True,
-                                         "default": ""})
+                                         "default": ""}),
+                "FUNC": ("FUNC",)
             }
         }
 
     CATEGORY = "ETK"
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE","FUNC",)
     FUNCTION = "tinytxt2img"
 
     def tinytxt2img(self, prompt, neg_prompt, name="tinytxt2img", overrides: str = "",
-                    clip_encoder="comfy",
+                    clip_encoder="comfy -ignore below",
                     token_normalization="length+mean",
-                    weight_interpretation="comfy++"):
+                    weight_interpretation="comfy++",
+                    FUNC: callable = None):
         """ use the imports from nodes to generate an image from text """
 
         import random
@@ -150,6 +153,8 @@ class TinyTxtToImg:
         self.height = 512
         self.batch_size = 1
         self.denoise = 1.0
+        self.one_seed_per_batch = False
+
         if overrides:
             if overrides != "":
                 overrides = overrides.replace("'", "\"")
@@ -161,6 +166,9 @@ class TinyTxtToImg:
                         self.__setattr__(k, v)
                     else:
                         print(f"invalid override key: {k}")
+        ## TODO: probably need to prepare the execution better to make sure that applying the incomming func can change everything
+        if FUNC is not None:
+            self.__dict__.update(FUNC(self.__dict__))
         if clip_encoder == "comfy -ignore below":
             self.pos_cond = CLIPTextEncode.encode(None, self.clp, self.positive)[0]
             self.neg_cond = CLIPTextEncode.encode(None, self.clp, self.negative)[0]
@@ -182,12 +190,23 @@ class TinyTxtToImg:
                                   self.mdl,
                                   self.seed, self.steps, self.cfg, self.sampler_name, self.scheduler,
                                   self.pos_cond, self.neg_cond,
-                                  self.latent_image, denoise=self.denoise)[0]
+                                  self.latent_image,
+                                  denoise=self.denoise,
+                                  one_seed_per_batch=self.one_seed_per_batch)[0]
 
         image = VAEDecode.decode(None, self.vae, samples)[0]
         image = image.detach().cpu()
 
-        return (image,)
+        return (image,lambda : self.tinytxt2img(prompt,
+                                                neg_prompt,
+                                                name,
+                                                overrides,
+                                                clip_encoder,
+                                                token_normalization,
+                                                weight_interpretation,
+                                                FUNC
+                                                )
+                ,)
 
 
 if SaveImage != None:
@@ -230,10 +249,17 @@ class ExecWidget:
     def INPUT_TYPES(cls):
         return {"optional":
             {
-                "text_to_eval": ("STRING", {"multiline": True}),
+                "text_to_eval": ("STRING",
+                                 {"multiline": True,
+                                  "default":"int_out=int_out\n"
+                                            "float_out=float_out\n"
+                                            "string_out=string_out\n"
+                                            "image_out=image_out\n"
+                                  }),
                 "image1_in": ("IMAGE", {"multiline": False}),
                 "float1_in": ("FLOAT", {"multiline": False}),
                 "string1_in": ("STRING", {"multiline": False}),
+                "int1_in": ("INT", {"multiline": False}),
 
             },
             "required": {
@@ -244,16 +270,20 @@ class ExecWidget:
         }
 
     CATEGORY = "text"
-    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT")
+    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT")
     FUNCTION = "exec_handler"
 
     def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                     name: str = "exec_func"):
+                     int1_in: int = 0,name: str = "exec_func"):
         """
         >>> ExecWidget().exec_handler("2 + 3")
         '5'
         """
         result = None
+        out_image = None
+        out_float = None
+        out_string = None
+
         if image1_in is not None:
             image_in = image1_in.clone()
         else:
@@ -262,21 +292,34 @@ class ExecWidget:
         new_locals = {"float_out": float1_in,
                       "image_out": image_in,
                       "string_out": string1_in,
+                      "int_out": int1_in,
                       }
-        exec(text_to_eval, globals(), new_locals)
+        try:
+            if isinstance(text_to_eval, list):
+                text_to_eval = text_to_eval[0]
 
-        # merge new_locals into globals
-        # globals().update(new_locals)
-        # locals().update(new_locals)
-        # print(globals())
-        out_string = new_locals.get("string_out", None)
-        out_image = new_locals.get("image_out", None)
-        out_float = new_locals.get("float_out", None)
-        return (out_string, out_image, out_float,)
+            if "<code>" in text_to_eval and "</code>" in text_to_eval:
+                start = text_to_eval.find("<code>")
+                end = text_to_eval.find("</code>")
+                text_to_eval = text_to_eval[start + 6:end]
+
+            exec(text_to_eval, globals(), new_locals)
+            out_string = new_locals.get("string_out", None)
+            out_image = new_locals.get("image_out", None)
+            out_float = new_locals.get("float_out", None)
+            out_int = new_locals.get("int_out", None)
+
+
+        except Exception as e:
+            print(e)
+            out_string = str(e)
+
+        return (out_string, out_image, out_float, out_int)
 
     @classmethod
-    def IS_CHANGED(s,  text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                     name: str = "exec_func"):
+    def IS_CHANGED(s, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
+                   int1_in: int = 0, name: str = "exec_func"):
+
         m = hashlib.sha256()
         m.update(name.encode("utf-8"))
         return m.digest().hex()
@@ -1194,6 +1237,34 @@ def get_image_size(image):
     width = int(size[0])
     height = int(size[1])
     return (width * height)
+
+
+class KSampler:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"model": ("MODEL",),
+                     "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
+                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
+                     "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
+                     "positive": ("CONDITIONING",),
+                     "negative": ("CONDITIONING",),
+                     "latent_image": ("LATENT",),
+                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                     "one_seed_per_batch": ([True, False], {"default": False}),
+                     }}
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "sample"
+
+    CATEGORY = "sampling"
+
+    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0,
+               one_seed_per_batch=False):
+        return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                               denoise=denoise, one_seed_per_batch=one_seed_per_batch)
 
 
 if __name__ == "__main__":
