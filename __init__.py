@@ -3,13 +3,15 @@ try:
     import comfy.samplers
     from custom_nodes.EternalKernelLiteGraphNodes.image import PreviewImageTest
     from custom_nodes.EternalKernelLiteGraphNodes.image import TinyTxtToImg
+    from custom_nodes.EternalKernelLiteGraphNodes.image import KSampler
+
     use_generic_nodes = False
 except:
     use_generic_nodes = True
     print("ETK> Failed to import comfy.samplers, assuming no comfyui skipping SD related nodes")
 
 from custom_nodes.EternalKernelLiteGraphNodes.latent import LatentInterpolation
-from custom_nodes.EternalKernelLiteGraphNodes.image  import PadToMatch
+from custom_nodes.EternalKernelLiteGraphNodes.image import PadToMatch
 from custom_nodes.EternalKernelLiteGraphNodes.image import StackImages
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageBC
 from custom_nodes.EternalKernelLiteGraphNodes.image import RGBA_MOD
@@ -26,6 +28,9 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
 from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
 
+from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncBase
+from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRender
+from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRenderImage
 
 if use_generic_nodes:
     NODE_CLASS_MAPPINGS_GENERIC = {
@@ -44,6 +49,10 @@ if use_generic_nodes:
         "Load Layered Image": LoadImage,
         "Eval Widget": ExecWidget,
         "Image Distance Mask": ImageDistanceMask,
+
+        "function": FuncBase,
+        "function render": FuncRender,
+        "function render image": FuncRenderImage,
     }
 
     NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_GENERIC)
@@ -67,9 +76,14 @@ else:
         "Tiny Txt 2 Img": TinyTxtToImg,
         "Image Distance Mask": ImageDistanceMask,
         "Preview Image Test": PreviewImageTest,
+        "ETK_KSampler": KSampler,
+        "function": FuncBase,
+        "function render": FuncRender,
+        "function render image": FuncRenderImage,
+
     }
     NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_COMFY)
 
-
 from custom_nodes.EternalKernelLiteGraphNodes.video import NODE_CLASS_MAPPINGS as NODE_CLASS_MAPPINGS_VIDEO
+
 NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_VIDEO)
