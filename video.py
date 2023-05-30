@@ -212,20 +212,23 @@ class VideoFileToImageStack(VideoFileToImage, metaclass=WidgetMetaclass):
             print("Error: Unable to open video file")
             return
 
-        # Seek to idx_slice_start+idx frame
-        vidcap.set(cv2.CAP_PROP_POS_FRAMES, idx_slice_start + idx)
 
-        count = idx_slice_start + idx
-        while count < idx_slice_stop + idx:
+        start = (idx * slice_idx_step) + idx_slice_start
+        stop = (idx * slice_idx_step) + idx_slice_stop
+
+        for frame_count in range(start, stop, slice_idx_step):
+            # Seek to frame_count frame
+            vidcap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
+
             success, image = vidcap.read()
             if not success:
                 print("Error: Unable to read frame from video file")
                 break
+            #image_list.append(image)
+
+
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_list.append(image)
-            count += slice_idx_step
-            # seek to next frame
-            vidcap.set(cv2.CAP_PROP_POS_FRAMES, count)
 
         # Convert list of images to tensor (T,H,W,C)
         tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
