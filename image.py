@@ -127,6 +127,10 @@ class TinyTxtToImg:
 
         import random
         import json
+
+        if not hasattr(CheckpointLoaderSimple, "share_mdl"):
+            CheckpointLoaderSimple.share_mdl = None
+
         if CheckpointLoaderSimple.share_mdl is None:
             self.mdl, self.clp, self.vae, self.vision = CheckpointLoaderSimple.load_checkpoint(None,
                                                                                                ckpt_name="v1-5-pruned-emaonly.safetensors"
