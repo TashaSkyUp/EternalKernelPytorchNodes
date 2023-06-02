@@ -27,6 +27,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import LoadImage
 from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
 from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
+from custom_nodes.EternalKernelLiteGraphNodes.image import TextRender
 
 from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncBase
 from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRender
@@ -50,9 +51,12 @@ if use_generic_nodes:
         "Eval Widget": ExecWidget,
         "Image Distance Mask": ImageDistanceMask,
 
+        "Image Text": TextRender,
+
         "function": FuncBase,
         "function render": FuncRender,
         "function render image": FuncRenderImage,
+
     }
 
     NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_GENERIC)
@@ -77,6 +81,9 @@ else:
         "Image Distance Mask": ImageDistanceMask,
         "Preview Image Test": PreviewImageTest,
         "ETK_KSampler": KSampler,
+
+        "Image Text": TextRender,
+
         "function": FuncBase,
         "function render": FuncRender,
         "function render image": FuncRenderImage,
