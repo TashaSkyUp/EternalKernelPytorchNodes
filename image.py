@@ -1,10 +1,13 @@
+import doctest
+
 try:
-    import comfy.samplers
-    # import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
-    from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
-        SaveImage
-    from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
-    from nodes import common_ksampler
+    if __name__ != "__main__":
+        import comfy.samplers
+        # import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
+        from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
+            SaveImage
+        from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
+        from nodes import common_ksampler
 except ImportError as e:
     print("ETK> comfy.samplers not found, skipping comfyui")
     SaveImage = None
@@ -32,6 +35,42 @@ avoid numpy and PIL as much as possible
 """
 
 
+def get_fonts():
+    # Directory paths for fonts in Windows and Linux
+    windows_fonts_dir = 'C:\\Windows\\Fonts\\'
+    linux_fonts_dir = '/usr/share/fonts/'
+
+    # Use the appropriate directory based on the current platform
+    if os.name == 'nt':  # Windows
+        fonts_dir = windows_fonts_dir
+    else:  # Linux and others
+        fonts_dir = linux_fonts_dir
+
+    # Initialize the list of fonts
+    fonts = []
+
+    # Check if the directory exists
+    if os.path.exists(fonts_dir):
+        try:
+            # Traverse the directory recursively and add all .ttf and .otf files to the list
+            for dirpath, dirnames, filenames in os.walk(fonts_dir):
+                for filename in filenames:
+                    if filename.endswith('.ttf') or filename.endswith('.otf'):
+                        fonts.append(os.path.join(dirpath, filename))
+        except PermissionError:
+            print(f"Permission denied to access the directory: {fonts_dir}")
+        except Exception as e:
+            print(f"An error occurred while accessing the directory: {fonts_dir}")
+            print(e)
+    else:
+        print(f"The directory does not exist: {fonts_dir}")
+
+    return fonts
+
+
+fonts = get_fonts()
+
+
 def rgba_per_channel_norm(image):
     """ normalize per channel """
     print("normalizing per channel")
@@ -57,8 +96,12 @@ def rgba_per_channel_norm(image):
 def torch_image_show(image):
     """Show a torch image"""
     from PIL import Image
-    image = torch.mul(image[0], 255, )
-    image = image.to(torch.uint8)  # Convert tensor to uint8 data type
+
+    if image.size().__len__() == 4:
+        image = image[0]
+    if image.dtype != torch.uint8:
+        image = torch.mul(image, 255, )
+        image = image.to(torch.uint8)  # Convert tensor to uint8 data type
 
     # must have at least 3 channels
     if image.shape[-1] == 1:
@@ -115,7 +158,7 @@ class TinyTxtToImg:
 
     CATEGORY = "ETK"
 
-    RETURN_TYPES = ("IMAGE","FUNC",)
+    RETURN_TYPES = ("IMAGE", "FUNC",)
     FUNCTION = "tinytxt2img"
 
     def tinytxt2img(self, prompt, neg_prompt, name="tinytxt2img", overrides: str = "",
@@ -201,7 +244,7 @@ class TinyTxtToImg:
         image = VAEDecode.decode(None, self.vae, samples)[0]
         image = image.detach().cpu()
 
-        return (image,lambda : self.tinytxt2img(prompt,
+        return (image, lambda: self.tinytxt2img(prompt,
                                                 neg_prompt,
                                                 name,
                                                 overrides,
@@ -213,7 +256,7 @@ class TinyTxtToImg:
                 ,)
 
 
-if SaveImage != None:
+if "SaveImage" in globals():
     class PreviewImageTest(SaveImage):
         def __init__(self):
             self.output_dir = folder_paths.get_temp_directory()
@@ -255,10 +298,10 @@ class ExecWidget:
             {
                 "text_to_eval": ("STRING",
                                  {"multiline": True,
-                                  "default":"int_out=int_out\n"
-                                            "float_out=float_out\n"
-                                            "string_out=string_out\n"
-                                            "image_out=image_out\n"
+                                  "default": "int_out=int_out\n"
+                                             "float_out=float_out\n"
+                                             "string_out=string_out\n"
+                                             "image_out=image_out\n"
                                   }),
                 "image1_in": ("IMAGE", {"multiline": False}),
                 "float1_in": ("FLOAT", {"multiline": False}),
@@ -278,7 +321,7 @@ class ExecWidget:
     FUNCTION = "exec_handler"
 
     def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                     int1_in: int = 0,name: str = "exec_func"):
+                     int1_in: int = 0, name: str = "exec_func"):
         """
         >>> ExecWidget().exec_handler("2 + 3")
         '5'
@@ -1215,13 +1258,6 @@ class rgba_merge:
         return (torch.cat((r, g, b, a), dim=3),)
 
 
-
-
-
-
-
-
-
 class rgba_split:
     """splits the channels of an RGBA image"""
 
@@ -1301,7 +1337,139 @@ class KSampler:
                                denoise=denoise, one_seed_per_batch=one_seed_per_batch)
 
 
-if __name__ == "__main__":
-    import doctest
+from PIL import Image, ImageDraw, ImageFont
+import torch
+import numpy as np
 
-    doctest.testmod()
+
+class TextRender:
+    """
+    renders text to an image
+    """
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"default": "Hello World!"}),
+                "x": ("INT", {
+                    "default": 128,
+                    "min": 0,
+                    "max": 1024,
+                    "step": 1
+                }),
+                "y": ("INT", {
+                    "default": 128,
+                    "min": 0,
+                    "max": 1024,
+                    "step": 1
+                }),
+                "width": ("INT", {
+                    "default": 100,
+                    "min": 1,
+                    "max": 1024,
+                    "step": 32
+                }),
+                "height": ("INT", {
+                    "default": 100,
+                    "min": 1,
+                    "max": 1024,
+                    "step": 32
+                }),
+                "font": (fonts,),
+                "size": ("INT", {
+                    "default": 16,
+                    "min": 1,
+                    "max": 200,
+                    "step": 1
+                }),
+                "color": ("STRING", {
+                    "default": "#000000"
+                })
+            }
+        }
+
+    CATEGORY = "ETK/text"
+
+    RETURN_TYPES = ("IMAGE", "IMAGE",)
+
+    FUNCTION = "render_text"
+
+    def render_text(self, text, x, y, width, height, font='Arial', size=16, color='#000000'):
+        """
+        This function renders the provided text at specified location, with the given width and height.
+        The text is rendered in the provided font, size, and color.
+
+        >>> tr = TextRender()
+        >>> result = tr.render_text('Hello, world!', 128, 128, 512, 512,"Arial",16,"#FF11000")
+        >>> torch_image_show(result[0][0])
+        """
+
+        # Create an empty image with RGBA channels
+        image = Image.new('RGBA', (width, height))
+
+        # Get a drawing context
+        d = ImageDraw.Draw(image)
+
+        # Define font - this assumes Arial is available.
+        # For different font, a full path to .ttf or .otf file may be required.
+        fallback_list = ['Arial', 'FreeSans', 'DejaVu Sans', 'Liberation Sans', 'Bitstream Vera Sans', 'sans-serif']
+        try:
+            font = ImageFont.truetype(font, size)
+        except IOError:
+            # Fallback
+            try:
+                font = ImageFont.truetype(fallback_list, size)
+            except IOError:
+                # Fallback
+                font = ImageFont.load_default()
+
+        # the text may be multi line draw each line
+        lines = text.split('\n')
+        for i,line in enumerate(lines):
+            # Get the width and height of the text
+            w, h = d.textsize(line, font=font)
+
+            # Calculate the position of the text as an offset from the given x,y and the current line we are rendering i
+            y_offset = y + (i * h)
+            x_offset = x + (width - w) / 2
+
+
+            # Draw the text
+            d.text((x_offset, y_offset),
+                   line, font=font, fill="#FFFFFF")
+
+
+
+        # Convert the image to numpy array
+        image_array = np.array(image)
+
+        # Convert the numpy array to PyTorch tensor and add batch dimension
+        image_tensor = torch.from_numpy(image_array).unsqueeze(0).float() / 255.0
+
+        # set the alpha to the first channel to make a mask
+        image_tensor[..., 3] = image_tensor[..., 0]
+
+        # now set the text to the correct color
+        color_arr = torch.zeros(1, 1, 1, 3)
+        color_arr[0, 0, 0, 0] = int(color[1:3], 16) / 255.0
+        color_arr[0, 0, 0, 1] = int(color[3:5], 16) / 255.0
+        color_arr[0, 0, 0, 2] = int(color[5:7], 16) / 255.0
+        # use color_arr to set the color
+        image_tensor[..., 0:3] *= color_arr
+
+        # make a copy for the RGB image
+        image_rgb = image_tensor[..., :3]
+
+        return (image_rgb, image_tensor,)
+
+
+if __name__ == "__main__":
+    # test TextRender
+    tr = TextRender()
+    result = tr.render_text('Hello, world!', 128, 128, 512, 512, "Arial", 16, "#FFFF000")[0]
+    torch_image_show(result)
+    print(result.shape)
