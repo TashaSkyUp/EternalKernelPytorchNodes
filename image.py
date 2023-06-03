@@ -1,29 +1,33 @@
-import doctest
+import os
+testing = os.environ.get("ETERNAL_KERNEL_LITEGRAPH_NODES_TEST", None)
+if testing == "True":
+    testing = True
+elif __name__ == "__main__":
+    testing=True
+else:
+    testing=False
 
-try:
-    if __name__ != "__main__":
-        import comfy.samplers
-        # import custom_nodes.Derfuu_ComfyUI_ModdedNodes.components.fields as field
+if testing:
+    pass
+else:
+    try:
         from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
             SaveImage
         from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
         from nodes import common_ksampler
-except ImportError as e:
-    print("ETK> comfy.samplers not found, skipping comfyui")
-    SaveImage = None
+        import folder_paths
+        import comfy.samplers
+    except ImportError as e:
+        print("ETK> comfy.samplers not found, skipping comfyui")
+        SaveImage = None
 
 import torch
 import torchvision
 import PIL.Image as Image
-
-try:
-    import folder_paths
-except:
-    pass
-
 import os
 import numpy as np
 import hashlib
+
 
 ### info for code completion AI ###
 """
@@ -1408,41 +1412,12 @@ class TextRender:
         >>> torch_image_show(result[0][0])
         """
 
+        font_name = font
+
         # Create an empty image with RGBA channels
         image = Image.new('RGBA', (width, height))
 
-        # Get a drawing context
-        d = ImageDraw.Draw(image)
-
-        # Define font - this assumes Arial is available.
-        # For different font, a full path to .ttf or .otf file may be required.
-        fallback_list = ['Arial', 'FreeSans', 'DejaVu Sans', 'Liberation Sans', 'Bitstream Vera Sans', 'sans-serif']
-        try:
-            font = ImageFont.truetype(font, size)
-        except IOError:
-            # Fallback
-            try:
-                font = ImageFont.truetype(fallback_list, size)
-            except IOError:
-                # Fallback
-                font = ImageFont.load_default()
-
-        # the text may be multi line draw each line
-        lines = text.split('\n')
-        for i,line in enumerate(lines):
-            # Get the width and height of the text
-            w, h = d.textsize(line, font=font)
-
-            # Calculate the position of the text as an offset from the given x,y and the current line we are rendering i
-            y_offset = y + (i * h)
-            x_offset = x + (width - w) / 2
-
-
-            # Draw the text
-            d.text((x_offset, y_offset),
-                   line, font=font, fill="#FFFFFF")
-
-
+        self._render_text(font_name, image, size, text, x, y, allow_shrink=True)
 
         # Convert the image to numpy array
         image_array = np.array(image)
@@ -1463,8 +1438,85 @@ class TextRender:
 
         # make a copy for the RGB image
         image_rgb = image_tensor[..., :3]
-
+        print(torch.cuda.memory_stats())
         return (image_rgb, image_tensor,)
+
+    from PIL import ImageFont, ImageDraw
+    from PIL import ImageFont, ImageDraw
+
+    def _wrap_text(self, font, line, max_width,d):
+        words = line.split(' ')
+        new_line = ''
+        lines = []
+        for word in words:
+            temp_line = new_line + word + ' '
+            w, _ = d.textsize(temp_line, font=font)
+            if w > max_width:
+                lines.append(new_line.strip())
+                new_line = word + ' '
+            else:
+                new_line = temp_line
+
+        lines.append(new_line.strip())
+        wrapped_line = '\n'.join(lines)
+        return wrapped_line
+
+    def _render_text(self, font_name, image, size, text, x, y, allow_wrap=True, allow_shrink=True):
+        width = image.size[0]
+        d = ImageDraw.Draw(image)
+        font = ImageFont.truetype(font_name, size)
+        lines = text.split('\n')
+
+        shrink_threshold = 24  # The minimum font size before we start wrapping text
+        line_spacing = 5  # The constant space between lines
+        y_offset = y
+        previous_height = 0  # Store the height of the previous line
+
+        for i, line in enumerate(lines):
+            if line.strip() == ''or line.strip() == '\n':
+                # For blank lines, add a blank line of the previous line's height
+                y_offset += previous_height + line_spacing
+            else:
+                w, h = d.textsize(line, font=font)
+                previous_height = h  # Update the previous height
+
+                if w > width:
+                    if allow_shrink:
+                        new_font_size = int(size * width / w)
+                        if new_font_size >= shrink_threshold:
+                            font = ImageFont.truetype(font_name, new_font_size)
+                        else:
+                            # The font size is too small, start wrapping text
+                            wrapped_line = self._wrap_text(font, line, width,d)
+                            y_offset=self._render_text(font_name,
+                                              image,
+                                              size,
+                                              wrapped_line, x, y_offset + line_spacing,
+                                              allow_wrap=False,
+                                              allow_shrink=False)
+                            continue  # Skip to the next line
+
+                    if allow_wrap:
+                        # Wrap the text
+                        wrapped_line = self._wrap_text(font, line, width,d)
+                        y_offset= self._render_text(font_name,
+                                          image,
+                                          new_font_size,
+                                          wrapped_line,
+                                          x,
+                                          y_offset + line_spacing,
+                                          allow_wrap = False,
+                                          allow_shrink=False)
+                        continue  # Skip to the next line
+
+                # Draw the line
+                x_offset = x + (width - w) / 2
+                d.text((x_offset, y_offset), line, font=font, fill="#FFFFFF")
+                y_offset += h + line_spacing  # Move y_offset to the bottom of the last line drawn plus the line spacing
+        # debug print the amount of free memory in torch
+
+
+        return y_offset
 
 
 if __name__ == "__main__":
