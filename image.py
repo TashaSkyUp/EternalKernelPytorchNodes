@@ -330,14 +330,14 @@ class ExecWidget:
 
             },
             "required": {
-                "name": ("STRING", {"multiline": False,
-                                    "default": "exec_func"}
+                "CODE_STR_IN": ("STRING", {"multiline": False,
+                                    "default": ""}
                          ),
             }
         }
 
     CATEGORY = "text"
-    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE")
+    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE","CODE")
     FUNCTION = "exec_handler"
     INTERNAL_STATE_DISPLAY_CODE = True
 
@@ -376,6 +376,7 @@ class ExecWidget:
                 text_to_eval = text_to_eval[start + 8:end]
 
             exec(text_to_eval, globals(), new_locals)
+            source_code = text_to_eval
 
             string_out = new_locals.get("string_out", None)
             image_out = new_locals.get("image_out", None)
@@ -386,7 +387,7 @@ class ExecWidget:
         except Exception as e:
             string_out = str(e)
 
-        return (string_out, image_out, float_out, int_out, tuple_out,)
+        return (string_out, image_out, float_out, int_out, tuple_out,source_code)
 
     @classmethod
     def IS_CHANGED(s, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
