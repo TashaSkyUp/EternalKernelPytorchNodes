@@ -316,7 +316,7 @@ class ExecWidget:
     def INPUT_TYPES(cls):
         return {"optional":
             {
-                "text_to_eval": ("STRING",
+                "text_to_eval": ("CODE",
                                  {"multiline": True,
                                   "default": "int_out=int_out\n"
                                              "float_out=float_out\n"
@@ -339,6 +339,7 @@ class ExecWidget:
     CATEGORY = "text"
     RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT")
     FUNCTION = "exec_handler"
+    INTERNAL_STATE_DISPLAY_CODE = True
 
     def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
                      int1_in: int = 0, name: str = "exec_func"):
@@ -350,6 +351,7 @@ class ExecWidget:
         out_image = None
         out_float = None
         out_string = None
+        out_int = None
 
         if image1_in is not None:
             image_in = image1_in.clone()
@@ -365,10 +367,16 @@ class ExecWidget:
             if isinstance(text_to_eval, list):
                 text_to_eval = text_to_eval[0]
 
+            # evaluate for code tag
             if "<code>" in text_to_eval and "</code>" in text_to_eval:
                 start = text_to_eval.find("<code>")
                 end = text_to_eval.find("</code>")
                 text_to_eval = text_to_eval[start + 6:end]
+            # also evaluate for ```python tag
+            if "```python" in text_to_eval and "```" in text_to_eval:
+                start = text_to_eval.find("```python")
+                end = text_to_eval.find("```")
+                text_to_eval = text_to_eval[start + 8:end]
 
             exec(text_to_eval, globals(), new_locals)
             out_string = new_locals.get("string_out", None)
@@ -378,7 +386,6 @@ class ExecWidget:
 
 
         except Exception as e:
-            print(e)
             out_string = str(e)
 
         return (out_string, out_image, out_float, out_int)
