@@ -13,13 +13,23 @@ else:
     try:
         from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
             SaveImage
-        from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
+
         from nodes import common_ksampler
         import folder_paths
         import comfy.samplers
     except ImportError as e:
         print("ETK> comfy.samplers not found, skipping comfyui")
-        SaveImage = None
+        class SaveImage:
+            def __init__(self):
+                pass
+            def __call__(self, *args, **kwargs):
+                pass
+
+try:
+    from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
+except ImportError as e:
+    print("ETK> advanced clip not found, skipping it")
+
 
 import torch
 import torchvision
@@ -223,17 +233,23 @@ class TinyTxtToImg:
         if clip_encoder == "comfy -ignore below":
             self.pos_cond = CLIPTextEncode.encode(None, self.clp, self.positive)[0]
             self.neg_cond = CLIPTextEncode.encode(None, self.clp, self.negative)[0]
+
         elif clip_encoder == "advanced":
-            self.pos_cond = CLIPTextEncodeAdvanced.encode(None,
-                                                          self.clp,
-                                                          self.positive,
-                                                          token_normalization,
-                                                          weight_interpretation)[0]
-            self.neg_cond = CLIPTextEncodeAdvanced.encode(None,
-                                                          self.clp,
-                                                          self.negative,
-                                                          token_normalization,
-                                                          weight_interpretation)[0]
+            try:
+                self.pos_cond = CLIPTextEncodeAdvanced.encode(None,
+                                                              self.clp,
+                                                              self.positive,
+                                                              token_normalization,
+                                                              weight_interpretation)[0]
+                self.neg_cond = CLIPTextEncodeAdvanced.encode(None,
+                                                              self.clp,
+                                                              self.negative,
+                                                              token_normalization,
+                                                              weight_interpretation)[0]
+            except any as e:
+                print(e)
+                raise ValueError("advanced clip encoder failed")
+
 
         self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
@@ -260,37 +276,37 @@ class TinyTxtToImg:
                 ,)
 
 
-if "SaveImage" in globals():
-    class PreviewImageTest(SaveImage):
-        def __init__(self):
-            self.output_dir = folder_paths.get_temp_directory()
-            self.type = "temp"
 
-        @classmethod
-        def INPUT_TYPES(s):
-            return {
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-                "required": {
-                    "images": ("IMAGE",),
-                },
-                "optional": {
-                    "prompt": ("STRING", {"multiline": True}),
-                    "neg_prompt": ("STRING", {"multiline": True}),
-                    "clip_encoder": (["comfy -ignore below", "advanced"],),
-                    "token_normalization": (["none", "mean", "length", "length+mean"],),
-                    "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],)
-                },
-            }
+class PreviewImageTest(SaveImage):
+    def __init__(self):
+        self.output_dir = folder_paths.get_temp_directory()
+        self.type = "temp"
 
-        def myfunc(self, images, prompt=None, extra_pnginfo=None, ret=None):
-            return ret
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+            "required": {
+                "images": ("IMAGE",),
+            },
+            "optional": {
+                "prompt": ("STRING", {"multiline": True}),
+                "neg_prompt": ("STRING", {"multiline": True}),
+                "clip_encoder": (["comfy -ignore below", "advanced"],),
+                "token_normalization": (["none", "mean", "length", "length+mean"],),
+                "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],)
+            },
+        }
 
-        CATEGORY = "ETK/image"
+    def myfunc(self, images, prompt=None, extra_pnginfo=None, ret=None):
+        return ret
 
-        def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **kwargs):
-            ret = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
-            my_ret = self.myfunc(images, prompt, extra_pnginfo, ret)
-            return my_ret
+    CATEGORY = "ETK/image"
+
+    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **kwargs):
+        ret = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
+        my_ret = self.myfunc(images, prompt, extra_pnginfo, ret)
+        return my_ret
 
 
 class ExecWidget:
