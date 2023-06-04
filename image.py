@@ -1,11 +1,12 @@
 import os
+
 testing = os.environ.get("ETERNAL_KERNEL_LITEGRAPH_NODES_TEST", None)
 if testing == "True":
     testing = True
 elif __name__ == "__main__":
-    testing=True
+    testing = True
 else:
-    testing=False
+    testing = False
 
 if testing:
     pass
@@ -19,9 +20,12 @@ else:
         import comfy.samplers
     except ImportError as e:
         print("ETK> comfy.samplers not found, skipping comfyui")
+
+
         class SaveImage:
             def __init__(self):
                 pass
+
             def __call__(self, *args, **kwargs):
                 pass
 
@@ -30,14 +34,12 @@ try:
 except ImportError as e:
     print("ETK> advanced clip not found, skipping it")
 
-
 import torch
 import torchvision
 import PIL.Image as Image
 import os
 import numpy as np
 import hashlib
-
 
 ### info for code completion AI ###
 """
@@ -250,7 +252,6 @@ class TinyTxtToImg:
                 print(e)
                 raise ValueError("advanced clip encoder failed")
 
-
         self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
         samples = KSampler.sample(None,
@@ -274,7 +275,6 @@ class TinyTxtToImg:
                                                 FUNC
                                                 )
                 ,)
-
 
 
 class PreviewImageTest(SaveImage):
@@ -337,21 +337,17 @@ class ExecWidget:
         }
 
     CATEGORY = "text"
-    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT")
+    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE")
     FUNCTION = "exec_handler"
     INTERNAL_STATE_DISPLAY_CODE = True
 
     def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                     int1_in: int = 0, name: str = "exec_func"):
+                     int1_in: int = 0, tuple1_in: tuple = None,
+                     name: str = "exec_func"):
         """
         >>> ExecWidget().exec_handler("2 + 3")
         '5'
         """
-        result = None
-        out_image = None
-        out_float = None
-        out_string = None
-        out_int = None
 
         if image1_in is not None:
             image_in = image1_in.clone()
@@ -362,6 +358,7 @@ class ExecWidget:
                       "image_out": image_in,
                       "string_out": string1_in,
                       "int_out": int1_in,
+                      "tuple_out": tuple1_in,
                       }
         try:
             if isinstance(text_to_eval, list):
@@ -379,16 +376,17 @@ class ExecWidget:
                 text_to_eval = text_to_eval[start + 8:end]
 
             exec(text_to_eval, globals(), new_locals)
-            out_string = new_locals.get("string_out", None)
-            out_image = new_locals.get("image_out", None)
-            out_float = new_locals.get("float_out", None)
-            out_int = new_locals.get("int_out", None)
 
+            string_out = new_locals.get("string_out", None)
+            image_out = new_locals.get("image_out", None)
+            float_out = new_locals.get("float_out", None)
+            int_out = new_locals.get("int_out", None)
+            tuple_out = new_locals.get("tuple_out", None)
 
         except Exception as e:
-            out_string = str(e)
+            string_out = str(e)
 
-        return (out_string, out_image, out_float, out_int)
+        return (string_out, image_out, float_out, int_out, tuple_out,)
 
     @classmethod
     def IS_CHANGED(s, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
@@ -1467,7 +1465,7 @@ class TextRender:
     from PIL import ImageFont, ImageDraw
     from PIL import ImageFont, ImageDraw
 
-    def _wrap_text(self, font, line, max_width,d):
+    def _wrap_text(self, font, line, max_width, d):
         words = line.split(' ')
         new_line = ''
         lines = []
@@ -1496,7 +1494,7 @@ class TextRender:
         previous_height = 0  # Store the height of the previous line
 
         for i, line in enumerate(lines):
-            if line.strip() == ''or line.strip() == '\n':
+            if line.strip() == '' or line.strip() == '\n':
                 # For blank lines, add a blank line of the previous line's height
                 y_offset += previous_height + line_spacing
             else:
@@ -1510,26 +1508,26 @@ class TextRender:
                             font = ImageFont.truetype(font_name, new_font_size)
                         else:
                             # The font size is too small, start wrapping text
-                            wrapped_line = self._wrap_text(font, line, width,d)
-                            y_offset=self._render_text(font_name,
-                                              image,
-                                              size,
-                                              wrapped_line, x, y_offset + line_spacing,
-                                              allow_wrap=False,
-                                              allow_shrink=False)
+                            wrapped_line = self._wrap_text(font, line, width, d)
+                            y_offset = self._render_text(font_name,
+                                                         image,
+                                                         size,
+                                                         wrapped_line, x, y_offset + line_spacing,
+                                                         allow_wrap=False,
+                                                         allow_shrink=False)
                             continue  # Skip to the next line
 
                     if allow_wrap:
                         # Wrap the text
-                        wrapped_line = self._wrap_text(font, line, width,d)
-                        y_offset= self._render_text(font_name,
-                                          image,
-                                          new_font_size,
-                                          wrapped_line,
-                                          x,
-                                          y_offset + line_spacing,
-                                          allow_wrap = False,
-                                          allow_shrink=False)
+                        wrapped_line = self._wrap_text(font, line, width, d)
+                        y_offset = self._render_text(font_name,
+                                                     image,
+                                                     new_font_size,
+                                                     wrapped_line,
+                                                     x,
+                                                     y_offset + line_spacing,
+                                                     allow_wrap=False,
+                                                     allow_shrink=False)
                         continue  # Skip to the next line
 
                 # Draw the line
@@ -1537,7 +1535,6 @@ class TextRender:
                 d.text((x_offset, y_offset), line, font=font, fill="#FFFFFF")
                 y_offset += h + line_spacing  # Move y_offset to the bottom of the last line drawn plus the line spacing
         # debug print the amount of free memory in torch
-
 
         return y_offset
 
