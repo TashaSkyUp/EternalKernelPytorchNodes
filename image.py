@@ -316,6 +316,17 @@ class ExecWidget:
     def INPUT_TYPES(cls):
         return {"optional":
             {
+
+                "code_str_in": ("STRING", {"multiline": True,
+                                           "default": ""
+                                           }),
+                "image1_in": ("IMAGE",),
+                "float1_in": ("FLOAT", {"multiline": False}),
+                "string1_in": ("STRING", {"multiline": False}),
+                "int1_in": ("INT", {"multiline": False}),
+
+            },
+            "required": {
                 "text_to_eval": ("CODE",
                                  {"multiline": True,
                                   "default": "int_out=int_out\n"
@@ -323,42 +334,46 @@ class ExecWidget:
                                              "string_out=string_out\n"
                                              "image_out=image_out\n"
                                   }),
-                "image1_in": ("IMAGE", {"multiline": False}),
-                "float1_in": ("FLOAT", {"multiline": False}),
-                "string1_in": ("STRING", {"multiline": False}),
-                "int1_in": ("INT", {"multiline": False}),
-
-            },
-            "required": {
-                "CODE_STR_IN": ("STRING", {"multiline": False,
-                                    "default": ""}
-                         ),
             }
         }
 
     CATEGORY = "text"
-    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE","CODE")
-    FUNCTION = "exec_handler"
+    RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE", "CODE")
+    FUNCTION = "pre_exec_handler"
     INTERNAL_STATE_DISPLAY_CODE = True
+    OUTPUT_NODE = True
 
-    def exec_handler(self, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                     int1_in: int = 0, tuple1_in: tuple = None,
-                     name: str = "exec_func"):
+    def pre_exec_handler(self, **kwargs):
+        image1_in = kwargs.get("image1_in", None)
+        float1_in = kwargs.get("float1_in", 0.0)
+        string1_in = kwargs.get("string1_in", "")
+        int1_in = kwargs.get("int1_in", 0)
+        tuple1_in = kwargs.get("tuple1_in", None)
+        name = kwargs.get("name", "exec_func")
+        text_to_eval = kwargs.get("text_to_eval", "")
+        code_str_in = kwargs.get("code_str_in", "")
+        if code_str_in != "":
+            text_to_eval = code_str_in
+        else:
+            code_str_in = None
+
+        ret = self.exec_handler(text_to_eval, image1_in, float1_in, string1_in, int1_in, tuple1_in, name)
+
+        ret_formatted = {"ui": {"text": [ret[-1]]}, "result": ret}
+        return ret_formatted
+
+    def exec_handler(self, text_to_eval, image_obj: torch.Tensor = None, float_obj: float = 0.0, string_obj: str = "",
+                     int_obj: int = 0, tuple_obj: tuple = None, name: str = "exec_func"):
         """
         >>> ExecWidget().exec_handler("2 + 3")
         '5'
         """
 
-        if image1_in is not None:
-            image_in = image1_in.clone()
-        else:
-            image_in = None
-
-        new_locals = {"float_out": float1_in,
-                      "image_out": image_in,
-                      "string_out": string1_in,
-                      "int_out": int1_in,
-                      "tuple_out": tuple1_in,
+        new_locals = {"float_out": float_obj,
+                      "image_out": image_obj,
+                      "string_out": string_obj,
+                      "int_out": int_obj,
+                      "tuple_out": tuple_obj,
                       }
         try:
             if isinstance(text_to_eval, list):
@@ -370,28 +385,36 @@ class ExecWidget:
                 end = text_to_eval.find("</code>")
                 text_to_eval = text_to_eval[start + 6:end]
             # also evaluate for ```python tag
+
             if "```python" in text_to_eval and "```" in text_to_eval:
                 start = text_to_eval.find("```python")
-                end = text_to_eval.find("```")
-                text_to_eval = text_to_eval[start + 8:end]
+                end = text_to_eval.find("```", start + 8)
+                text_to_eval = text_to_eval[start + 9:end]
+
+            if "```" in text_to_eval:
+                start = text_to_eval.find("```")
+                end = text_to_eval.find("```", start + 2)
+                text_to_eval = text_to_eval[start + 3:end]
 
             exec(text_to_eval, globals(), new_locals)
             source_code = text_to_eval
 
-            string_out = new_locals.get("string_out", None)
-            image_out = new_locals.get("image_out", None)
-            float_out = new_locals.get("float_out", None)
-            int_out = new_locals.get("int_out", None)
-            tuple_out = new_locals.get("tuple_out", None)
-
         except Exception as e:
-            string_out = str(e)
+            string_obj = str(e)
+            source_code=text_to_eval
 
-        return (string_out, image_out, float_out, int_out, tuple_out,source_code)
+        string_obj = new_locals.get("string_out", string_obj)
+        image_obj = new_locals.get("image_out", image_obj)
+        float_obj = new_locals.get("float_out", float_obj)
+        int_obj = new_locals.get("int_out", int_obj)
+        tuple_obj = new_locals.get("tuple_out", tuple_obj)
+
+
+        return (string_obj, image_obj, float_obj, int_obj, tuple_obj, text_to_eval)
 
     @classmethod
-    def IS_CHANGED(s, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
-                   int1_in: int = 0, name: str = "exec_func"):
+    def IS_CHANGED_NOPE(s, text_to_eval, image1_in: torch.Tensor = None, float1_in: float = 0.0, string1_in: str = "",
+                        int1_in: int = 0, name: str = "exec_func"):
 
         m = hashlib.sha256()
         m.update(name.encode("utf-8"))
