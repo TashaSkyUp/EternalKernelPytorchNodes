@@ -16,7 +16,7 @@ else:
             SaveImage
 
         from nodes import common_ksampler
-        import folder_paths
+
         import comfy.samplers
     except ImportError as e:
         print("ETK> comfy.samplers not found, skipping comfyui")
@@ -34,6 +34,7 @@ try:
 except ImportError as e:
     print("ETK> advanced clip not found, skipping it")
 
+import folder_paths
 import torch
 import torchvision
 import PIL.Image as Image
