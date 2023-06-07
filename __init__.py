@@ -25,7 +25,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import Quantize
 from custom_nodes.EternalKernelLiteGraphNodes.image import SelectFromRGBSimilarity
 from custom_nodes.EternalKernelLiteGraphNodes.image import LoadImage
 from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
-from custom_nodes.EternalKernelLiteGraphNodes.image import ExecWidget
+from custom_nodes.EternalKernelLiteGraphNodes.image import CodeExecWidget
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
 from custom_nodes.EternalKernelLiteGraphNodes.image import TextRender
 
@@ -48,7 +48,7 @@ if use_generic_nodes:
         "Quantize": Quantize,
         "Select From RGB Similarity": SelectFromRGBSimilarity,
         "Load Layered Image": LoadImage,
-        "Eval Widget": ExecWidget,
+        "Code Execution Widget": CodeExecWidget,
         "Image Distance Mask": ImageDistanceMask,
 
         "Image Text": TextRender,
@@ -76,7 +76,7 @@ else:
         "Select From RGB Similarity": SelectFromRGBSimilarity,
         "Load Layered Image": LoadImage,
         "Prompt Template": PromptTemplate,
-        "Eval Widget": ExecWidget,
+        "Code Execution Widget": CodeExecWidget,
         "Tiny Txt 2 Img": TinyTxtToImg,
         "Image Distance Mask": ImageDistanceMask,
         "Preview Image Test": PreviewImageTest,

@@ -310,7 +310,7 @@ class PreviewImageTest(SaveImage):
         return my_ret
 
 
-class ExecWidget:
+class CodeExecWidget:
     """runs eval on the given text"""
 
     @classmethod
@@ -338,7 +338,7 @@ class ExecWidget:
             }
         }
 
-    CATEGORY = "text"
+    CATEGORY = "image"
     RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE", "CODE")
     FUNCTION = "pre_exec_handler"
     INTERNAL_STATE_DISPLAY_CODE = True
@@ -366,7 +366,7 @@ class ExecWidget:
     def exec_handler(self, text_to_eval, image_obj: torch.Tensor = None, float_obj: float = 0.0, string_obj: str = "",
                      int_obj: int = 0, tuple_obj: tuple = None, name: str = "exec_func"):
         """
-        >>> ExecWidget().exec_handler("2 + 3")
+        >>> CodeExecWidget().exec_handler("2 + 3")
         '5'
         """
 
