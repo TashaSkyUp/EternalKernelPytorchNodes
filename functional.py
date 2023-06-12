@@ -1,14 +1,10 @@
 _func = {"func": ("FUNC",)}
-_text = {"code": ("STRING", {"multiline": True, "default": "x=func(x)"})}
+_text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
 
 optional = lambda x: {"optional": {k: v for k, v in x.items()}}
 required = lambda x: {"required": {k: v for k, v in x.items()}}
 both = lambda a, b: {**a, **b}
 many = lambda *dicts: {k: v for d in dicts for k, v in d.items()}  # non tested
-
-
-f=lambda x : TinyTxtToImg.tinytxt2img(**kwa)
-#TinyTxtToImg.tinytxt2img()
 
 
 class FuncBase:
@@ -50,15 +46,21 @@ class FuncRender:
         use = required(both(_func, _text))
         return use
 
-    RETURN_TYPES = ("FLOAT",)
+    RETURN_TYPES = ("FLOAT","STRING","INT",)
     FUNCTION = "func"
     CATEGORY = "ETK/func"
 
     def func(self, func: callable, code):
+        y_float= None
+        y_string = None
+        y_int = None
 
         globals = self.globals
         locals = self.locals
-        locals["x"]=func
+        locals["y_float"] = y_float
+        locals["y_string"] = y_string
+        locals["y_int"] = y_int
+        locals["x"] = func
         # code should do something like:
         # func like : lambda x:["what"]*x
         # code like : 'f=[x for x in x(2)]'
@@ -66,7 +68,7 @@ class FuncRender:
         self.globals = globals
         self.locals = locals
 
-        return (locals["y"],)
+        return (locals["y_float"],locals["y_string"],locals["y_int"],)
 
 
 class FuncRenderImage:
@@ -98,11 +100,7 @@ class FuncRenderImage:
 
         return (locals["y"],)
 
-if __name__ == "__main__":
-    test = {}
-
-    pass
-class CodeExecWidget:
+class ExecWidget:
     """runs eval on the given text"""
 
     @classmethod
@@ -119,18 +117,18 @@ class CodeExecWidget:
                 "int1_in": ("INT", {"multiline": False}),
 
             },
-            "required": {
-                "text_to_eval": ("CODE",
-                                 {"multiline": True,
-                                  "default": "int_out=int_out\n"
-                                             "float_out=float_out\n"
-                                             "string_out=string_out\n"
-                                             "image_out=image_out\n"
-                                  }),
-            }
+             "required": {
+            #     "text_to_eval": ("STRING",
+            #                      {"multiline": True,
+            #                       "default": "int_out=int_out\n"
+            #                                  "float_out=float_out\n"
+            #                                  "string_out=string_out\n"
+            #                                  "image_out=image_out\n"
+            #                       }),
+             }
         }
 
-    CATEGORY = "ETK/func"
+    CATEGORY = "text"
     RETURN_TYPES = ("STRING", "IMAGE", "FLOAT", "INT", "TUPLE", "CODE")
     FUNCTION = "pre_exec_handler"
     INTERNAL_STATE_DISPLAY_CODE = True
@@ -158,7 +156,7 @@ class CodeExecWidget:
     def exec_handler(self, text_to_eval, image_obj: torch.Tensor = None, float_obj: float = 0.0, string_obj: str = "",
                      int_obj: int = 0, tuple_obj: tuple = None, name: str = "exec_func"):
         """
-        >>> CodeExecWidget().exec_handler("2 + 3")
+        >>> ExecWidget().exec_handler("2 + 3")
         '5'
         """
 
@@ -212,3 +210,10 @@ class CodeExecWidget:
         m = hashlib.sha256()
         m.update(name.encode("utf-8"))
         return m.digest().hex()
+
+
+if __name__ == "__main__":
+    test = {}
+
+    pass
+
