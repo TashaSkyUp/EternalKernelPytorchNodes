@@ -1,3 +1,5 @@
+import hashlib
+
 _func = {"func": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
 
@@ -23,10 +25,9 @@ class FuncBase:
     CATEGORY = "ETK/func"
 
     def func(self, code: str, func: callable = lambda x: x):
-
         globals = self.globals
         locals = self.locals
-        locals["x"]=func
+        locals["x"] = func
         # code should do something like:
         # func like : lambda x:["what"]*x
         # code like : 'f=[x for x in x(2)]'
@@ -46,12 +47,12 @@ class FuncRender:
         use = required(both(_func, _text))
         return use
 
-    RETURN_TYPES = ("FLOAT","STRING","INT",)
+    RETURN_TYPES = ("FLOAT", "STRING", "INT",)
     FUNCTION = "func"
     CATEGORY = "ETK/func"
 
     def func(self, func: callable, code):
-        y_float= None
+        y_float = None
         y_string = None
         y_int = None
 
@@ -68,7 +69,7 @@ class FuncRender:
         self.globals = globals
         self.locals = locals
 
-        return (locals["y_float"],locals["y_string"],locals["y_int"],)
+        return (locals["y_float"], locals["y_string"], locals["y_int"],)
 
 
 class FuncRenderImage:
@@ -87,10 +88,9 @@ class FuncRenderImage:
     CATEGORY = "ETK/func"
 
     def func(self, func: callable, code):
-
         globals = self.globals
         locals = self.locals
-        locals["x"]=func
+        locals["x"] = func
         # code should do something like:
         # func like : lambda x:["what"]*x
         # code like : 'f=[x for x in x(2)]'
@@ -100,7 +100,10 @@ class FuncRenderImage:
 
         return (locals["y"],)
 
+
 class ExecWidget:
+    import torch
+
     """runs eval on the given text"""
 
     @classmethod
@@ -117,15 +120,15 @@ class ExecWidget:
                 "int1_in": ("INT", {"multiline": False}),
 
             },
-             "required": {
-            #     "text_to_eval": ("STRING",
-            #                      {"multiline": True,
-            #                       "default": "int_out=int_out\n"
-            #                                  "float_out=float_out\n"
-            #                                  "string_out=string_out\n"
-            #                                  "image_out=image_out\n"
-            #                       }),
-             }
+            "required": {
+                #     "text_to_eval": ("STRING",
+                #                      {"multiline": True,
+                #                       "default": "int_out=int_out\n"
+                #                                  "float_out=float_out\n"
+                #                                  "string_out=string_out\n"
+                #                                  "image_out=image_out\n"
+                #                       }),
+            }
         }
 
     CATEGORY = "text"
@@ -192,14 +195,13 @@ class ExecWidget:
 
         except Exception as e:
             string_obj = str(e)
-            source_code=text_to_eval
+            source_code = text_to_eval
 
         string_obj = new_locals.get("string_out", string_obj)
         image_obj = new_locals.get("image_out", image_obj)
         float_obj = new_locals.get("float_out", float_obj)
         int_obj = new_locals.get("int_out", int_obj)
         tuple_obj = new_locals.get("tuple_out", tuple_obj)
-
 
         return (string_obj, image_obj, float_obj, int_obj, tuple_obj, text_to_eval)
 
@@ -216,4 +218,3 @@ if __name__ == "__main__":
     test = {}
 
     pass
-

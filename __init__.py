@@ -25,13 +25,13 @@ from custom_nodes.EternalKernelLiteGraphNodes.image import Quantize
 from custom_nodes.EternalKernelLiteGraphNodes.image import SelectFromRGBSimilarity
 from custom_nodes.EternalKernelLiteGraphNodes.image import LoadImage
 from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
-from custom_nodes.EternalKernelLiteGraphNodes.image import CodeExecWidget
 from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
 from custom_nodes.EternalKernelLiteGraphNodes.image import TextRender
 
 from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncBase
 from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRender
 from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRenderImage
+from custom_nodes.EternalKernelLiteGraphNodes.functional import ExecWidget
 
 if use_generic_nodes:
     NODE_CLASS_MAPPINGS_GENERIC = {
@@ -48,7 +48,7 @@ if use_generic_nodes:
         "Quantize": Quantize,
         "Select From RGB Similarity": SelectFromRGBSimilarity,
         "Load Layered Image": LoadImage,
-        "Code Execution Widget": CodeExecWidget,
+        "Code Execution Widget": ExecWidget,
         "Image Distance Mask": ImageDistanceMask,
 
         "Image Text": TextRender,
@@ -76,7 +76,7 @@ else:
         "Select From RGB Similarity": SelectFromRGBSimilarity,
         "Load Layered Image": LoadImage,
         "Prompt Template": PromptTemplate,
-        "Code Execution Widget": CodeExecWidget,
+        "Code Execution Widget": ExecWidget,
         "Tiny Txt 2 Img": TinyTxtToImg,
         "Image Distance Mask": ImageDistanceMask,
         "Preview Image Test": PreviewImageTest,

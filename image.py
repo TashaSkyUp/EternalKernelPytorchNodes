@@ -131,7 +131,9 @@ def torch_image_show(image):
 
 class TinyTxtToImg:
     """small text to image generator"""
-
+    share_clip = None
+    share_mdl = None
+    share_vae = None
     def __init__(self):
         import random
         self.mdl = None
@@ -152,6 +154,7 @@ class TinyTxtToImg:
         self.latent_image = None
         self.samples = None
 
+
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -161,6 +164,8 @@ class TinyTxtToImg:
                 "clip_encoder": (["comfy -ignore below", "advanced"],),
                 "token_normalization": (["none", "mean", "length", "length+mean"],),
                 "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],),
+                "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+
 
             },
             "optional": {
@@ -182,30 +187,34 @@ class TinyTxtToImg:
                     clip_encoder="comfy -ignore below",
                     token_normalization="length+mean",
                     weight_interpretation="comfy++",
-                    FUNC: callable = None):
+                    FUNC: callable = None,
+                    ckpt_name="v1-5-pruned-emaonly.safetensors",
+                    ):
         """ use the imports from nodes to generate an image from text """
 
         import random
         import json
 
-        if not hasattr(CheckpointLoaderSimple, "share_mdl"):
-            CheckpointLoaderSimple.share_mdl = None
+        if not hasattr( TinyTxtToImg, "share_mdl"):
+            TinyTxtToImg.share_mdl = None
 
-        if CheckpointLoaderSimple.share_mdl is None:
-            self.mdl, self.clp, self.vae, self.vision = CheckpointLoaderSimple.load_checkpoint(None,
-                                                                                               ckpt_name="v1-5-pruned-emaonly.safetensors"
-                                                                                               )
-            CSL = CheckpointLoaderSimple
+        if TinyTxtToImg.share_mdl is None:
+            self.mdl, self.clp, self.vae, self.vision = \
+                CheckpointLoaderSimple.load_checkpoint(None,
+                                                       ckpt_name=ckpt_name
+                                                       )
+            CSL = TinyTxtToImg
             CSL.share_mdl = self.mdl
             CSL.share_clip = self.clp
             CSL.share_vae = self.vae
             CSL.share_vision = self.vision
 
         else:
-            self.mdl, self.clp, self.vae = (CheckpointLoaderSimple.share_mdl,
-                                            CheckpointLoaderSimple.share_clip,
-                                            CheckpointLoaderSimple.share_vae
+            self.mdl, self.clp, self.vae = (TinyTxtToImg.share_mdl,
+                                            TinyTxtToImg.share_clip,
+                                            TinyTxtToImg.share_vae
                                             )
+
         self.seed = random.randint(0, 2 ** 32 - 1)
         self.steps = 10
         self.cfg = 8
@@ -1273,8 +1282,13 @@ class KSampler:
 
     def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0,
                one_seed_per_batch=False):
-        return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                               denoise=denoise, one_seed_per_batch=one_seed_per_batch)
+        try:
+            return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                               denoise=denoise,one_seed_per_batch=one_seed_per_batch)
+        except TypeError as e:
+            return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                   denoise=denoise)
+
 
 
 from PIL import Image, ImageDraw, ImageFont
