@@ -121,13 +121,13 @@ class ExecWidget:
 
             },
             "required": {
-                #     "text_to_eval": ("STRING",
-                #                      {"multiline": True,
-                #                       "default": "int_out=int_out\n"
-                #                                  "float_out=float_out\n"
-                #                                  "string_out=string_out\n"
-                #                                  "image_out=image_out\n"
-                #                       }),
+                     "text_to_eval": ("STRING",
+                                      {"multiline": True,
+                                       "default": "int_out=int_out\n"
+                                                  "float_out=float_out\n"
+                                                  "string_out=string_out\n"
+                                                  "image_out=image_out\n"
+                                       }),
             }
         }
 
