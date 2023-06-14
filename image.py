@@ -274,16 +274,10 @@ class TinyTxtToImg:
 
         image = VAEDecode.decode(None, self.vae, samples)[0]
         image = image.detach().cpu()
-
-        return (image, lambda: self.tinytxt2img(prompt,
-                                                neg_prompt,
-                                                name,
-                                                overrides,
-                                                clip_encoder,
-                                                token_normalization,
-                                                weight_interpretation,
-                                                FUNC
-                                                )
+        self.FUNC = TinyTxtToImg.tinytxt2img
+        self.ARGS = (prompt, neg_prompt, name, overrides, clip_encoder, token_normalization, weight_interpretation, FUNC)
+        return (image,
+                self
                 ,)
 
 

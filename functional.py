@@ -1,5 +1,6 @@
 import hashlib
 
+_list = {"list": ("LIST",)}
 _func = {"func": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
 
@@ -44,10 +45,13 @@ class FuncRender:
 
     @classmethod
     def INPUT_TYPES(cls):
-        use = required(both(_func, _text))
+        use = both(
+            required(
+                both(_func, _text)),
+            optional(_list)
+            )
         return use
-
-    RETURN_TYPES = ("FLOAT", "STRING", "INT",)
+    RETURN_TYPES = ("FLOAT", "STRING", "INT", "LIST")
     FUNCTION = "func"
     CATEGORY = "ETK/func"
 
@@ -69,7 +73,7 @@ class FuncRender:
         self.globals = globals
         self.locals = locals
 
-        return (locals["y_float"], locals["y_string"], locals["y_int"],)
+        return (locals["y_float"], locals["y_string"], locals["y_int"],locals["y_list"],)
 
 
 class FuncRenderImage:
@@ -80,17 +84,23 @@ class FuncRenderImage:
 
     @classmethod
     def INPUT_TYPES(cls):
-        use = required(both(_func, _text))
+        use = both(
+            required(
+                both(_func, _text)),
+            optional(_list)
+            )
         return use
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "func"
     CATEGORY = "ETK/func"
+    OUTPUT_NODE = True
 
-    def func(self, func: callable, code):
+    def func(self, func, code, **kwargs):
         globals = self.globals
         locals = self.locals
         locals["x"] = func
+        locals["x_list"] = kwargs.get("list", None)
         # code should do something like:
         # func like : lambda x:["what"]*x
         # code like : 'f=[x for x in x(2)]'
