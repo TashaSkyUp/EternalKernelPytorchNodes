@@ -2,6 +2,7 @@ import hashlib
 
 _list = {"list": ("LIST",)}
 _func = {"func": ("FUNC",)}
+_func_extra = {"func_extra": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
 
 optional = lambda x: {"optional": {k: v for k, v in x.items()}}
@@ -11,6 +12,16 @@ many = lambda *dicts: {k: v for d in dicts for k, v in d.items()}  # non tested
 
 
 class FuncBase:
+    """
+    Base class for func nodes
+
+    Allows for a function to be passed in as a callable
+    and
+    for a string to be passed in as code to be executed
+    also
+    returns the function as a callable
+
+    """
     def __init__(self):
         from custom_nodes.EternalKernelLiteGraphNodes.image import common_ksampler, TinyTxtToImg
         self.locals = locals()
@@ -18,26 +29,50 @@ class FuncBase:
 
     @classmethod
     def INPUT_TYPES(cls):
-        use = both(optional(_func), required(_text))
+        req = required(_text)
+        opt = optional(
+                both(
+                    both(
+                        _func,
+                        _func_extra
+                    ),
+                    _list
+                )
+            )
+        use = both(req, opt)
+
         return use
 
     RETURN_TYPES = ("FUNC",)
     FUNCTION = "func"
     CATEGORY = "ETK/func"
 
-    def func(self, code: str, func: callable = lambda x: x):
-        globals = self.globals
-        locals = self.locals
-        locals["x"] = func
-        # code should do something like:
-        # func like : lambda x:["what"]*x
-        # code like : 'f=[x for x in x(2)]'
-        exec(code, globals, locals)
+    def func(self, **kwargs):
+        import inspect
+        self.globals = globals()
+        self.locals = locals()
+        self.locals["x1"] = kwargs.get("func", None)
+        self.locals["x2"] = kwargs.get("func_extra", None)
+        self.locals["x_list"] = kwargs.get("list", None)
 
-        return (locals["f"],)
+        self.IN_FUNC = kwargs.get("func", None)
+        self.EXTRA_IN_FUNC = kwargs.get("func_extra", None)
+        self.exec_code = kwargs.get("code", None)
+        self.ARGS = kwargs
+        self.CODE = inspect.getsource(self.func)
+
+        exec(self.exec_code, self.globals, self.locals)
+
+        return (self.func,)
 
 
 class FuncRender:
+    """
+    as input takes a function and a string of code
+    optionally takes a list of arguments
+    returns rendered results of types
+    float, string, int, list
+    """
     def __init__(self):
         from custom_nodes.EternalKernelLiteGraphNodes.image import common_ksampler, TinyTxtToImg
         self.locals = locals()
@@ -47,25 +82,32 @@ class FuncRender:
     def INPUT_TYPES(cls):
         use = both(
             required(
-                both(_func, _text)),
-            optional(_list)
+                _text),
+            optional(both(_list,_func)
             )
+        )
         return use
     RETURN_TYPES = ("FLOAT", "STRING", "INT", "LIST")
     FUNCTION = "func"
     CATEGORY = "ETK/func"
 
-    def func(self, func: callable, code):
+    def func(self, **kwargs):
         y_float = None
         y_string = None
         y_int = None
+        func = kwargs.get("func", None)
+        code = kwargs.get("code", None)
 
         globals = self.globals
         locals = self.locals
+
         locals["y_float"] = y_float
         locals["y_string"] = y_string
         locals["y_int"] = y_int
+        locals["y_list"] = None
+
         locals["x"] = func
+        locals["x_list"] = kwargs.get("list", None)
         # code should do something like:
         # func like : lambda x:["what"]*x
         # code like : 'f=[x for x in x(2)]'
@@ -179,6 +221,7 @@ class ExecWidget:
                       "int_out": int_obj,
                       "tuple_out": tuple_obj,
                       }
+
         try:
             if isinstance(text_to_eval, list):
                 text_to_eval = text_to_eval[0]
