@@ -258,7 +258,7 @@ class TinyTxtToImg:
                                                               self.negative,
                                                               token_normalization,
                                                               weight_interpretation)[0]
-            except any as e:
+            except Exception as e:
                 print(e)
                 raise ValueError("advanced clip encoder failed")
 
@@ -274,7 +274,7 @@ class TinyTxtToImg:
 
         image = VAEDecode.decode(None, self.vae, samples)[0]
         image = image.detach().cpu()
-        self.FUNC = TinyTxtToImg.tinytxt2img
+        self.FUNC = self.tinytxt2img
         self.ARGS = (prompt, neg_prompt, name, overrides, clip_encoder, token_normalization, weight_interpretation, FUNC)
         return (image,
                 self
