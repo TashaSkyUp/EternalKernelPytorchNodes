@@ -1,96 +1,70 @@
+import os
+import importlib
+OLD_NODE_CLASS_MAPPINGS = {
+    "Interpolation": "LatentInterpolation",
+    "Image Pad To Match": "PadToMatch",
+    "Image Stack": "StackImages",
+    "Image B/C": "ImageBC",
+    "Image RGBA Mod": "RGBA_MOD",
+    "Image RGBA Lower Clip": "rgba_lower_clip",
+    "Image RGBA Upper Clip": "rgba_upper_clip",
+    "Image RGBA Merge": "rgba_merge",
+    "Image RGBA Split": "rgba_split",
+    "Select From Batch": "select_from_batch",
+    "Quantize": "Quantize",
+    "Select From RGB Similarity": "SelectFromRGBSimilarity",
+    "Load Layered Image": "LoadImage",
+    "Code Execution Widget": "ExecWidget",
+    "Image Distance Mask": "ImageDistanceMask",
+    "Image Text": "TextRender",
+    "function": "FuncBase",
+    "function render": "FuncRender",
+    "function render image": "FuncRenderImage",
+    "Prompt Template": "PromptTemplate",
+    "Tiny Txt 2 Img": "TinyTxtToImg",
+    "Preview Image Test": "PreviewImageTest",
+    "ETK_KSampler": "KSampler",
+}
+# reverse the dict
+OLD_NODE_CLASS_MAPPINGS = {v: k for k, v in OLD_NODE_CLASS_MAPPINGS.items()}
+
 NODE_CLASS_MAPPINGS = {}
+
+# Try importing optional dependencies
 try:
     import comfy.samplers
-    from custom_nodes.EternalKernelLiteGraphNodes.image import PreviewImageTest
-    from custom_nodes.EternalKernelLiteGraphNodes.image import TinyTxtToImg
-    from custom_nodes.EternalKernelLiteGraphNodes.image import KSampler
-
     use_generic_nodes = False
-except:
+except ImportError:
     use_generic_nodes = True
     print("ETK> Failed to import comfy.samplers, assuming no comfyui skipping SD related nodes")
 
-from custom_nodes.EternalKernelLiteGraphNodes.latent import LatentInterpolation
-from custom_nodes.EternalKernelLiteGraphNodes.image import PadToMatch
-from custom_nodes.EternalKernelLiteGraphNodes.image import StackImages
-from custom_nodes.EternalKernelLiteGraphNodes.image import ImageBC
-from custom_nodes.EternalKernelLiteGraphNodes.image import RGBA_MOD
-from custom_nodes.EternalKernelLiteGraphNodes.image import rgba_lower_clip
-from custom_nodes.EternalKernelLiteGraphNodes.image import rgba_upper_clip
+# Load classes from modules in the custom_nodes.EternalKernelLiteGraphNodes package
+package_dir = os.path.dirname(os.path.abspath(__file__))
+package_name = "custom_nodes.EternalKernelLiteGraphNodes"
+for module_file in os.listdir(package_dir):
+    if module_file.endswith('.py') and not module_file.startswith('__'):
+        module_name = package_name + '.' + module_file[:-3]  # Removing .py extension
+        try:
+            module = importlib.import_module(module_name)
+            for class_name in dir(module):
+                class_obj = getattr(module, class_name)
+                if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):  # Checking if it's a class and has INPUT_TYPES attribute
+                    NODE_CLASS_MAPPINGS[class_name] = class_obj
+        except ImportError:
+            if not use_generic_nodes:
+                print(f"Failed to import {module_name}, it may require comfy.samplers. Skipping...")
 
-from custom_nodes.EternalKernelLiteGraphNodes.image import rgba_merge
-from custom_nodes.EternalKernelLiteGraphNodes.image import rgba_split
-from custom_nodes.EternalKernelLiteGraphNodes.image import select_from_batch
-from custom_nodes.EternalKernelLiteGraphNodes.image import Quantize
-from custom_nodes.EternalKernelLiteGraphNodes.image import SelectFromRGBSimilarity
-from custom_nodes.EternalKernelLiteGraphNodes.image import LoadImage
-from custom_nodes.EternalKernelLiteGraphNodes.image import PromptTemplate
-from custom_nodes.EternalKernelLiteGraphNodes.image import ImageDistanceMask
-from custom_nodes.EternalKernelLiteGraphNodes.image import TextRender
 
-from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncBase
-from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRender
-from custom_nodes.EternalKernelLiteGraphNodes.functional import FuncRenderImage
-from custom_nodes.EternalKernelLiteGraphNodes.functional import ExecWidget
+# use OLD_NODE_CLASS_MAPPINGS to add the old names to the new nodes
+new_node_class_mappings = {}
+for k, v in OLD_NODE_CLASS_MAPPINGS.items():
+    if NODE_CLASS_MAPPINGS[k]:
+        new_node_class_mappings[v] = NODE_CLASS_MAPPINGS[k]
+        # mark it for removeal
+        NODE_CLASS_MAPPINGS[k] = None
+    else:
+        print(f"ETK> Failed to find node {k} in new nodes, skipping...")
+# remove the nodes with None
+NODE_CLASS_MAPPINGS = {k: v for k, v in NODE_CLASS_MAPPINGS.items() if v is not None}
+NODE_CLASS_MAPPINGS.update(new_node_class_mappings)
 
-if use_generic_nodes:
-    NODE_CLASS_MAPPINGS_GENERIC = {
-        "Interpolation": LatentInterpolation,
-        "Image Pad To Match": PadToMatch,
-        "Image Stack": StackImages,
-        "Image B/C": ImageBC,
-        "Image RGBA Mod": RGBA_MOD,
-        "Image RGBA Lower Clip": rgba_lower_clip,
-        "Image RGBA Upper Clip": rgba_upper_clip,
-        "Image RGBA Merge": rgba_merge,
-        "Image RGBA Split": rgba_split,
-        "Select From Batch": select_from_batch,
-        "Quantize": Quantize,
-        "Select From RGB Similarity": SelectFromRGBSimilarity,
-        "Load Layered Image": LoadImage,
-        "Code Execution Widget": ExecWidget,
-        "Image Distance Mask": ImageDistanceMask,
-
-        "Image Text": TextRender,
-
-        "function": FuncBase,
-        "function render": FuncRender,
-        "function render image": FuncRenderImage,
-
-    }
-
-    NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_GENERIC)
-else:
-    NODE_CLASS_MAPPINGS_COMFY = {
-        "Interpolation": LatentInterpolation,
-        "Image Pad To Match": PadToMatch,
-        "Image Stack": StackImages,
-        "Image B/C": ImageBC,
-        "Image RGBA Mod": RGBA_MOD,
-        "Image RGBA Lower Clip": rgba_lower_clip,
-        "Image RGBA Upper Clip": rgba_upper_clip,
-        "Image RGBA Merge": rgba_merge,
-        "Image RGBA Split": rgba_split,
-        "Select From Batch": select_from_batch,
-        "Quantize": Quantize,
-        "Select From RGB Similarity": SelectFromRGBSimilarity,
-        "Load Layered Image": LoadImage,
-        "Prompt Template": PromptTemplate,
-        "Code Execution Widget": ExecWidget,
-        "Tiny Txt 2 Img": TinyTxtToImg,
-        "Image Distance Mask": ImageDistanceMask,
-        "Preview Image Test": PreviewImageTest,
-        "ETK_KSampler": KSampler,
-
-        "Image Text": TextRender,
-
-        "function": FuncBase,
-        "function render": FuncRender,
-        "function render image": FuncRenderImage,
-
-    }
-    NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_COMFY)
-
-from custom_nodes.EternalKernelLiteGraphNodes.video import NODE_CLASS_MAPPINGS as NODE_CLASS_MAPPINGS_VIDEO
-
-NODE_CLASS_MAPPINGS.update(NODE_CLASS_MAPPINGS_VIDEO)
