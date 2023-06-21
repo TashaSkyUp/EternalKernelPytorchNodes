@@ -20,7 +20,6 @@ OLD_NODE_CLASS_MAPPINGS = {
     "function": "FuncBase",
     "function render": "FuncRender",
     "function render image": "FuncRenderImage",
-    "Prompt Template": "PromptTemplate",
     "Tiny Txt 2 Img": "TinyTxtToImg",
     "Preview Image Test": "PreviewImageTest",
     "ETK_KSampler": "KSampler",
