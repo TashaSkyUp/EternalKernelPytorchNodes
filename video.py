@@ -26,13 +26,21 @@ video_dir = os.path.join(root_p, 'video')
 if not os.path.exists(video_dir):
     os.makedirs(video_dir)
 
-video_folders = lambda s: sorted(
-    [name for name in os.listdir(s.input_dir) if os.path.isdir(os.path.join(s.input_dir, name))])
 
-# any files in in_video_folders ending in .mp4
-video_files = lambda s: sorted(
-    [name for name in os.listdir(s.input_dir) if
-     os.path.isfile(os.path.join(s.input_dir, name)) and name.endswith('.mp4')])
+# video_folders = lambda s: sorted(
+#    [name for name in os.listdir(s.input_dir) if os.path.isdir(os.path.join(s.input_dir, name))])
+# turn the above in the a full function
+def video_folders(s):
+    ret = sorted(
+        [name for name in os.listdir(s.input_dir) if os.path.isdir(os.path.join(s.input_dir, name))])
+    return ret
+
+
+def video_files(s):
+    # any files in in_video_folders ending in .mp4
+    ret = sorted([name for name in os.listdir(s.input_dir) if
+                  os.path.isfile(os.path.join(s.input_dir, name)) and name.endswith('.mp4')])
+    return ret
 
 
 # start with an ABC to define the common widget interface
@@ -298,6 +306,7 @@ class ImageStackToVideoFrames(metaclass=WidgetMetaclass):
         del image_stack
         return ()
 
+
 class ImageStackToVideoFile(metaclass=WidgetMetaclass):
     """Really just saves the image stack to a video file"""
 
@@ -309,9 +318,9 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
                 "video_out": ("STRING", {"multiline": False, "default": "video01.mp4"}),
             },
             "optional":
-            {"fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
-             "func": ("FUNC", {"default": "NONE"}),
-             },
+                {"fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
+                 "func": ("FUNC", {"default": "NONE"}),
+                 },
         }
 
     RETURN_TYPES = ("FUNC",)
@@ -339,7 +348,6 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
         self.CODE = inspect.getsource(self.handler)
         self.FUNC = self.handler
 
-
         try:
             image_stack = kwargs["image_stack"]
         except KeyError:
@@ -358,7 +366,8 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
             shutil.move(video_out_path, random_folder)
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video = cv2.VideoWriter(video_out_path+".mp4", fourcc, float(fps), (image_stack.shape[2], image_stack.shape[1]))
+        video = cv2.VideoWriter(video_out_path + ".mp4", fourcc, float(fps),
+                                (image_stack.shape[2], image_stack.shape[1]))
 
         for i in range(image_stack.shape[0]):
             image = image_stack[i].numpy()

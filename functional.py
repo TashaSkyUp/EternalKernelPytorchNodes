@@ -1,7 +1,7 @@
 import hashlib
 
 _list = {"list": ("LIST",)}
-_func = {"func": ("FUNC",)}
+_func = {"func": ("FUNC",{"default": None})}
 _func_extra = {"func_extra": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
 
@@ -22,6 +22,7 @@ class FuncBase:
     returns the function as a callable
 
     """
+
     def __init__(self):
         from custom_nodes.EternalKernelLiteGraphNodes.image import common_ksampler, TinyTxtToImg
         self.locals = locals()
@@ -31,14 +32,14 @@ class FuncBase:
     def INPUT_TYPES(cls):
         req = required(_text)
         opt = optional(
+            both(
                 both(
-                    both(
-                        _func,
-                        _func_extra
-                    ),
-                    _list
-                )
+                    _func,
+                    _func_extra
+                ),
+                _list
             )
+        )
         use = both(req, opt)
 
         return use
@@ -73,6 +74,7 @@ class FuncRender:
     returns rendered results of types
     float, string, int, list
     """
+
     def __init__(self):
         from custom_nodes.EternalKernelLiteGraphNodes.image import common_ksampler, TinyTxtToImg
         self.locals = locals()
@@ -83,10 +85,11 @@ class FuncRender:
         use = both(
             required(
                 _text),
-            optional(both(_list,_func)
-            )
+            optional(both(_list, _func)
+                     )
         )
         return use
+
     RETURN_TYPES = ("FLOAT", "STRING", "INT", "LIST")
     FUNCTION = "func"
     CATEGORY = "ETK/func"
@@ -115,7 +118,7 @@ class FuncRender:
         self.globals = globals
         self.locals = locals
 
-        return (locals["y_float"], locals["y_string"], locals["y_int"],locals["y_list"],)
+        return (locals["y_float"], locals["y_string"], locals["y_int"], locals["y_list"],)
 
 
 class FuncRenderImage:
@@ -130,7 +133,7 @@ class FuncRenderImage:
             required(
                 both(_func, _text)),
             optional(_list)
-            )
+        )
         return use
 
     RETURN_TYPES = ("IMAGE",)
@@ -173,13 +176,13 @@ class ExecWidget:
 
             },
             "required": {
-                     "text_to_eval": ("STRING",
-                                      {"multiline": True,
-                                       "default": "int_out=int_out\n"
-                                                  "float_out=float_out\n"
-                                                  "string_out=string_out\n"
-                                                  "image_out=image_out\n"
-                                       }),
+                "text_to_eval": ("STRING",
+                                 {"multiline": True,
+                                  "default": "int_out=int_out\n"
+                                             "float_out=float_out\n"
+                                             "string_out=string_out\n"
+                                             "image_out=image_out\n"
+                                  }),
             }
         }
 
@@ -265,6 +268,41 @@ class ExecWidget:
         m = hashlib.sha256()
         m.update(name.encode("utf-8"))
         return m.digest().hex()
+
+
+class FuncListToList:
+    """runs eval on the given text, with a list as input and output"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = required(
+                     both(_list,
+                          _text)
+
+            )
+        opt = optional(_func)
+        use = both(req, opt)
+        return use
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        func = kwargs.get("func", None)
+        code = kwargs.get("code", None)
+        my_globals = globals()
+        my_locals = locals()
+
+        my_locals["x"] = func
+        my_locals["x_list"] = kwargs.get("list", None)
+
+        exec(code, my_globals, my_locals)
+
+        return (my_locals["y_list"],)
 
 
 if __name__ == "__main__":
