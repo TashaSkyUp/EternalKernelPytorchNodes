@@ -44,11 +44,22 @@ for module_file in os.listdir(package_dir):
     if module_file.endswith('.py') and not module_file.startswith('__'):
         module_name = package_name + '.' + module_file[:-3]  # Removing .py extension
         try:
-            module = importlib.import_module(module_name)
-            for class_name in dir(module):
-                class_obj = getattr(module, class_name)
-                if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):  # Checking if it's a class and has INPUT_TYPES attribute
+            # import directly from the file
+            full_path = os.path.join(package_dir, module_file)
+            with open(full_path, 'r') as f:
+                code = f.read()
+            exec(code, globals(), locals())
+            for class_name in dir():
+                class_obj = locals()[class_name]
+                if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):
                     NODE_CLASS_MAPPINGS[class_name] = class_obj
+
+
+            #module = importlib.import_module(module_name)
+            #for class_name in dir(module):
+            #    class_obj = getattr(module, class_name)
+            #    if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):  # Checking if it's a class and has INPUT_TYPES attribute
+            #        NODE_CLASS_MAPPINGS[class_name] = class_obj
         except ImportError:
             if not use_generic_nodes:
                 print(f"Failed to import {module_name}, it may require comfy.samplers. Skipping...")
