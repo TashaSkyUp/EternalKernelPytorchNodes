@@ -1,9 +1,10 @@
 import hashlib
 
 _list = {"list": ("LIST",)}
-_func = {"func": ("FUNC",{"default": None})}
+_func = {"func": ("FUNC", {"default": None})}
 _func_extra = {"func_extra": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
+_string = {"string": ("STRING", {"default": None})}
 
 optional = lambda x: {"optional": {k: v for k, v in x.items()}}
 required = lambda x: {"required": {k: v for k, v in x.items()}}
@@ -279,10 +280,10 @@ class FuncListToList:
     @classmethod
     def INPUT_TYPES(cls):
         req = required(
-                     both(_list,
-                          _text)
+            both(_list,
+                 _text)
 
-            )
+        )
         opt = optional(_func)
         use = both(req, opt)
         return use
@@ -303,6 +304,32 @@ class FuncListToList:
         exec(code, my_globals, my_locals)
 
         return (my_locals["y_list"],)
+
+
+class FuncStrToStr:
+    """runs eval on the given text, with a string as input and outputs a string"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = required(both(_string, _text))
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        text = kwargs.get("string", None)
+        code = kwargs.get("code", None)
+        my_globals = globals()
+        my_locals = locals()
+
+        exec(code, my_globals, my_locals)
+
+        return (my_locals["y"],)
 
 
 if __name__ == "__main__":
