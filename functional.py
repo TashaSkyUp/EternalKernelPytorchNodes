@@ -332,6 +332,30 @@ class FuncStrToStr:
         return (my_locals["y"],)
 
 
+class FuncStrToList:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = required(both(_string, _text))
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        text = kwargs.get("string", None)
+        code = kwargs.get("code", None)
+        my_globals = globals()
+        my_locals = locals()
+
+        exec(code, my_globals, my_locals)
+
+        return (my_locals["y_list"],)
+
+
 if __name__ == "__main__":
     test = {}
 
