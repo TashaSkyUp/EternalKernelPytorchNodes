@@ -356,6 +356,43 @@ class FuncStrToList:
         return (my_locals["y_list"],)
 
 
+class GetFirstCodeBlock():
+    """ returns the first code block in the text which is surrounded with ``` or
+    ```python or
+    <code> tags. If no code block is found, returns an empty string"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = required(_text)
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        text = kwargs.get("code", None)
+        # find the code block
+        if "```python" in text and "```" in text:
+            start = text.find("```python")
+            end = text.find("```", start + 8)
+            text = text[start + 9:end]
+        elif "```" in text:
+            start = text.find("```")
+            end = text.find("```", start + 2)
+            text = text[start + 3:end]
+        elif "<code>" in text and "</code>" in text:
+            start = text.find("<code>")
+            end = text.find("</code>")
+            text = text[start + 6:end]
+        else:
+            text = ""
+        return (text,)
+
+
 if __name__ == "__main__":
     test = {}
 
