@@ -70,3 +70,10 @@ class CreateRepoNode:
         subdirectory = kwargs.get("subdirectory", None)
 
         repo = git.Repo.init(subdirectory)
+
+
+class TestCreateRepoNode:
+    def test_create_repo(self):
+        node = CreateRepoNode()
+        node.create_repo(subdirectory="my_repo")
+        # Add assertions or additional test logic here
