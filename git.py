@@ -5,10 +5,8 @@ class PublicGitRepo:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": ("STRING", {"multiline": True}),
-                "replacement": ("STRING", {"multiline": True}),
-                "key1": ("STRING", {"multiline": False}),
-                "git_url": ("STRING", {"multiline": False})  # Added git_url input
+                "url": ("STRING", {"multiline": False}),  # Added url input
+                "email": ("STRING", {"multiline": False})  # Added email input
             }
         }
 
