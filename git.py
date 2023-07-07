@@ -1,4 +1,4 @@
-class PromptTemplate:
+class PublicGitRepo:
     """replaces the text in the given text string with a given other text at some key positions"""
 
     @classmethod
@@ -18,7 +18,7 @@ class PromptTemplate:
 
     def prompt_template_handler(self, text: str, replacement, key1, git_url):
         """
-        >>> PromptTemplate().prompt_template_handler("hello world", "universe", "world", "https://github.com/example/repo.git")
+        >>> PublicGitRepo().prompt_template_handler("hello world", "universe", "world", "https://github.com/example/repo.git")
         'hello universe'
         """
         return (text.replace(key1, replacement),)
