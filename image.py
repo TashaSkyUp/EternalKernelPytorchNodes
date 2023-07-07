@@ -1482,3 +1482,9 @@ if __name__ == "__main__":
     result = tr.render_text('Hello, world!', 128, 128, 512, 512, "Arial", 16, "#FFFF000")[0]
     torch_image_show(result)
     print(result.shape)
+
+def main():
+    pass
+
+if __name__ == "__main__":
+    main()
