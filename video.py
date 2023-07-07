@@ -13,6 +13,7 @@ import cv2
 import torch
 from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
 from torch import dtype
+from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
 
 NODE_CLASS_MAPPINGS = {}  # this is the dictionary that will be used to register the nodes
 
@@ -323,7 +324,8 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
                  },
         }
 
-    RETURN_TYPES = ("FUNC",)
+    RETURN_TYPES = ("FUNC", "STRING",)
+    RETURN_NAMES = ("FUNC", "video_out_path",)
     CATEGORY = "video"
     OUTPUT_NODE = True
     FUNCTION = "handler"
@@ -345,7 +347,12 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
         self.ARGS = kwargs
         self.IN_FUNC = func
         # get this functions source code
-        self.CODE = inspect.getsource(self.handler)
+        try:
+            self.CODE = inspect.getsource(ImageStackToVideoFile.handler)
+        except OSError:
+            self.CODE = "Unable to get source code"
+
+
         self.FUNC = self.handler
 
         try:
@@ -382,8 +389,248 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
         video.release()
         image_stack = None
         del image_stack
-        return (self,)
+        return (self, video_out_path + ".mp4",)
+
+
+class TemporalSpatialSmoothing(metaclass=WidgetMetaclass):
+    """Smooths the image stack in time and space"""
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+                "spatial_kernel_size": ("INT", {"default": 3, "min": 1, "max": 50}),
+                "temporal_kernel_size": ("INT", {"default": 3, "min": 1, "max": 50}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    @staticmethod
+    def gaussian_kernel_1d(kernel_size=3, sigma=1.0):
+        import numpy as np
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        x_coord = torch.arange(-kernel_size // 2 + 1., kernel_size // 2 + 1.).float()
+        gaussian_kernel = (1. / (sigma * torch.sqrt(torch.tensor(2. * np.pi)))) * torch.exp(
+            -x_coord ** 2. / (2 * sigma ** 2))
+        gaussian_kernel = gaussian_kernel / torch.sum(gaussian_kernel)
+        return gaussian_kernel
+
+    def handler(self, **kwargs):
+        import numpy as np
+        import torch
+        import torch.nn as nn
+
+        image_stack = kwargs["image_stack"]
+        spatial_kernel_size = kwargs["spatial_kernel_size"]
+        temporal_kernel_size = kwargs["temporal_kernel_size"]
+        spatial_sigma = kwargs.get("spatial_sigma", 1.0)
+        temporal_sigma = kwargs.get("temporal_sigma", 1.0)
+
+        # make sure image_stack is a torch tensor and has the right dimensions
+        if not torch.is_tensor(image_stack):
+            image_stack = torch.tensor(image_stack, dtype=torch.float32)
+
+        if len(image_stack.shape) < 5:  # if it doesn't have a channel dimension
+            image_stack = image_stack.unsqueeze(0)  # add a batch dimension
+            image_stack = image_stack.permute(0, 4, 1, 2,
+                                              3)  # rearrange dimensions to: (batch, channel, depth, height, width)
+
+        # create 1D Gaussian kernels for each dimension
+        spatial_kernel = self.gaussian_kernel_1d(spatial_kernel_size, spatial_sigma)
+        temporal_kernel = self.gaussian_kernel_1d(temporal_kernel_size, temporal_sigma)
+
+        # apply the convolution along each dimension separately
+        for dim, kernel in enumerate([temporal_kernel, spatial_kernel, spatial_kernel]):
+            padding_size = kernel.shape[0] // 2
+            # define the padding differently for each dimension
+            if dim == 0:  # depth (temporal)
+                padding = nn.ReplicationPad3d((0, 0, 0, 0, padding_size, padding_size))
+            elif dim == 1:  # height
+                padding = nn.ReplicationPad3d((0, 0, padding_size, padding_size, 0, 0))
+            elif dim == 2:  # width
+                padding = nn.ReplicationPad3d((padding_size, padding_size, 0, 0, 0, 0))
+            image_stack = padding(image_stack)
+            if dim == 0:  # depth/temporal
+                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(kernel.shape[0], 1, 1), groups=3,
+                                 bias=False)
+                reshaped_kernel = kernel[None, None, :, None, None]
+            elif dim == 1:  # height
+                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, kernel.shape[0], 1), groups=3,
+                                 bias=False)
+                reshaped_kernel = kernel[None, None, None, :, None]
+            elif dim == 2:  # width
+                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 1, kernel.shape[0]), groups=3,
+                                 bias=False)
+                reshaped_kernel = kernel[None, None, None, None, :]
+            conv.weight = nn.Parameter(reshaped_kernel.repeat(3, 1, 1, 1, 1), requires_grad=False)
+            image_stack = conv(image_stack)
+
+        # remove the batch dimension and rearrange dimensions back to: (depth, height, width, channel)
+        image_stack = image_stack.squeeze(0).permute(1, 2, 3, 0)
+
+        return (image_stack,)
+
+
+import torch
+from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
+from torchvision.utils import flow_to_image
+from torchvision.transforms.functional import resize
+
+
+class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
+    """Smooths the image stack in time using RAFT for optical flow estimation"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+                "k": ("INT", {"default": 3, "min": 1, "max": 120}),
+                "device": ("STRING", ["cpu", "cuda"]),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    @staticmethod
+    def make_grid(flow):
+        # Assumes flow is in shape Bx2xHxW
+        B, _, H, W = flow.size()
+        grid_y, grid_x = torch.meshgrid(torch.linspace(-1, 1, W), torch.linspace(-1, 1, H))
+        grid = torch.stack((grid_y.t(), grid_x.t()), 2).unsqueeze(0)
+        grid = grid.repeat(B, 1, 1, 1)  # Make it BxHxWx2
+        grid = grid.permute(0, 3, 1, 2)  # Convert to Bx2xHxW
+        grid = grid.type_as(flow)  # Make sure the data type is the same
+        return grid + flow
+
+    @staticmethod
+    def worker(args):
+        import torch.nn.functional as F
+        k, image_stack, device = args
+        weights = Raft_Large_Weights.DEFAULT
+        model = raft_large(weights=weights, progress=False).to(device)
+        model = model.eval()
+
+        img1 = image_stack[0].unsqueeze(0)
+        img2 = image_stack[1].unsqueeze(0)
+
+        # Remove batch dimension if present
+        while len(img1.shape) > 4:
+            print(f"Batch dimension detected. for image shape {img1.shape}")
+            img1 = img1.squeeze(0)
+            img2 = img2.squeeze(0)
+
+        # Permute tensor dimensions to match expected input for model
+        img1 = img1.permute(0, 3, 1, 2)
+        img2 = img2.permute(0, 3, 1, 2)
+
+        # Move images to the specified device
+        img1, img2 = img1.to(device), img2.to(device)
+
+        flow = model(img1, img2)[-1]
+
+        # Create intermediary frames
+        frames = []
+        for i in range(k):
+            factor = i  / k
+            #factor = factor * 2 - 1
+
+            #normalize flow
+            n_flow = flow.clone()
+            print(n_flow.min(), n_flow.max(), n_flow.dtype)
+            #n_flow[:,0,:,:] = n_flow[:,0,:,:] / (n_flow[:,0,:,:].max() - n_flow[:,0,:,:].min())
+            #n_flow[:,1,:,:] = n_flow[:,1,:,:] / (n_flow[:,1,:,:].max() - n_flow[:,1,:,:].min())
+            #print(n_flow.min(), n_flow.max(), n_flow.dtype)
+            #n_flow[:, 0, :, :] = n_flow[:, 0, :, :] - n_flow[:, 0, :, :].min()
+            #n_flow[:, 1, :, :] = n_flow[:, 1, :, :] - n_flow[:, 1, :, :].min()
+            #print (n_flow.min(), n_flow.max(),n_flow.dtype)
+            n_flow= n_flow/n_flow.shape[2]
+            print(n_flow.min(), n_flow.max(), n_flow.dtype)
+
+
+            flow_interpolated = n_flow * factor
+            grid = TemporalOpticalFlowSmoothing.make_grid(flow_interpolated)
+            grid = grid.permute(0, 2, 3, 1)
+            warped_image = F.grid_sample(img1, grid, mode='bicubic', padding_mode='zeros')
+            warped_image = warped_image.permute(0, 2, 3, 1).detach().cpu()  # Convert it back to BxHxWxC
+            frames.append(warped_image)
+
+        return frames
+
+    @staticmethod
+    def calculate_optical_flow(image_stack, device,k):
+        # from torch.multiprocessing import Pool, set_start_method
+
+        # set_start_method('spawn')  # set the start method to spawn
+        # with Pool(2) as pool:
+        #    # create the tasks in an intellegent way, detaching each stack, with each stack being only the frames needed
+        #    tasks = []
+        #    for t in range(image_stack.shape[0] - 1):
+        #        needed_frames = [t, t + 1]  # the frames needed for this task
+        #        stack = image_stack[needed_frames, :, :, :]  # the stack of frames needed for this task
+        #        stack = stack.clone()
+        #        tasks.append((2, stack.detach().cpu(), device))  # add the task to the list of tasks
+        #    flows = pool.map(TemporalOpticalFlowSmoothing.worker, tasks)
+        #    # print(f"flows: {flows}")
+        #    # print(f"flows[0]: {flows[0]}")
+
+        ##map(TemporalOpticalFlowSmoothing.worker, tasks)
+
+        flows = []
+        for i in range(image_stack.shape[0] - 1):
+            needed_frames = [i, i + 1]  # the frames needed for this task
+            keys = image_stack[needed_frames, :, :, :]
+            flow = TemporalOpticalFlowSmoothing.worker((k, keys, device))
+
+            flows.append(keys[0].cpu())
+            for f in flow:
+                flows.append(f[0].cpu())
+            #flows.append(keys[1].cpu())
+
+
+        return flows
+
+    def handler(self, **kwargs):
+        from copy import deepcopy
+        # image stacks are actually (b/t,w,h,c) so we need to rearrange the dimensions
+        k = kwargs["k"]
+        image_stack = deepcopy(kwargs["image_stack"])
+        device = kwargs.get("device", "cpu")
+
+        image_stack = image_stack.permute(0, 2, 1, 3)
+
+
+        # make sure image_stack is a torch tensor and has the right dimensions
+        if not torch.is_tensor(image_stack):
+            image_stack = torch.tensor(image_stack, dtype=torch.float32)
+
+        if len(image_stack.shape) < 4:  # if it doesn't have a channel dimension
+            image_stack = image_stack.unsqueeze(0)  # add a batch dimension
+
+        # Move image stack to the specified device
+        image_stack = image_stack.to(device)
+
+        # Calculate optical flow
+        flows = self.calculate_optical_flow(image_stack, device,k)
+        stack = torch.stack(flows, dim=0)
+        # Convert optical flows to images for visualization
+        # flow_images = [flow_to_image(flow) for flow in flows]
+        #change back to (b or t,w,h,c)
+
+        stack = stack.permute(0, 2, 1, 3)
+        return (stack,)
 
 
 if __name__ == "__main__":
-    print(NODE_CLASS_MAPPINGS)
+    import doctest
+
+    doctest.testmod()

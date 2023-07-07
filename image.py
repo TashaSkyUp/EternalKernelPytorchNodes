@@ -9,7 +9,12 @@ else:
     testing = False
 
 if testing:
-    pass
+    class SaveImage:
+        def __init__(self):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            pass
 else:
     try:
         from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
@@ -125,7 +130,16 @@ def torch_image_show(image):
         image = torch.cat((image, image, image), dim=-1)
 
     image = image.numpy()
-    image = Image.fromarray(image)  # Create a PIL image
+    try:
+        image = Image.fromarray(image)  # Create a PIL image
+    except TypeError as e:
+        # this is a np array not a torch tensor
+        # try to rearrange the channels using np
+        image = np.moveaxis(image, 0, -1)
+
+        #image.permute(1, 2, 0)
+        image = Image.fromarray(image)  # Create a PIL image
+
     image.show()
 
 
