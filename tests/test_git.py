@@ -1,5 +1,5 @@
 import unittest
-from git import CreateRepoNode
+from custom_nodes.EternalKernelLiteGraphNodes.git import CreateRepoNode
 
 class TestCreateRepoNode(unittest.TestCase):
     def test_create_repo(self):
