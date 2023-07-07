@@ -1,13 +1,10 @@
 import os
-os.chdir("E:/git/ComfyUI/")
 import unittest
 from custom_nodes.git import CreateRepoNode
 
-# Set the working directory to E:\git\ComfyUI\
-
-
 class TestCreateRepoNode(unittest.TestCase):
     def test_create_repo(self):
+        os.chdir("E:/git/ComfyUI/")
         node = CreateRepoNode()
         node.create_repo(subdirectory="my_repo")
         # Add assertions or additional test logic here
