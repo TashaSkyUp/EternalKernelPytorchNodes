@@ -1,79 +1,160 @@
-import giturlparse
-import git
+from git import Repo, InvalidGitRepositoryError
+import os
+import copy
+
+import re
 
 
 class PublicGitRepo:
-    """replaces the text in the given text string with a given other text at some key positions"""
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "url": ("STRING", {"multiline": False}),  # Added url input
-                "email": ("STRING", {"multiline": False})  # Added email input
+                "repo_url": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
             }
         }
 
-    CATEGORY = "ETK/git"
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "validate_git_repo_url"
+    RETURN_TYPES = ("bool",)
+    FUNCTION = 'validate_git_repo_url'
+    CATEGORY = 'ETK/git'
 
-    def validate_git_repo_url(self, **kwargs):
-        git_url = kwargs.get("url", None)
-        parsed_url = giturlparse.parse(git_url)
 
-        return (git_url,)
+def validate_git_repo_url(self, **kwargs):
+    kwargs = copy.deepcopy(kwargs)
+    repo_url = kwargs.get('repo_url')
+    token = kwargs.get('token')
+
+    # Regular expression to match GitHub repository URLs
+    pattern = r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?'
+    match = re.match(pattern, repo_url)
+
+    # The URL is valid if there's a match and it covers the whole URL
+    return match is not None and match.group() == repo_url
+
+
+class CloneRepoNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "repo_url": ("STRING", {"multiline": False, "default": ""}),
+                "path": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "LIST",)
+    RETURN_NAMES = ("path_passthrough","file_structure", "file_list",)
+    FUNCTION = 'clone_repo'
+    CATEGORY = 'ETK/git'
+
+    def clone_repo(self, **kwargs):
+        kwargs = copy.deepcopy(kwargs)
+        repo_url = kwargs.get('repo_url')
+        path = kwargs.get('path')
+        token = kwargs.get('token')
+        Repo.clone_from(repo_url, path, env={'GIT_ASKPASS': 'echo', 'GIT_USERNAME': token})
+
+        # return the file structure of the repo
+        ld = os.listdir(path)
+        return ("".join(ld), ld,)
+
+
+class PullRepoNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "repo_path": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = 'pull_repo'
+    CATEGORY = 'ETK/git'
+
+
+def pull_repo(self, **kwargs):
+    kwargs = copy.deepcopy(kwargs)
+    repo_path = kwargs.get('repo_path')
+    token = kwargs.get('token')
+    repo = Repo(repo_path)
+    origin = repo.remotes.origin
+    # with repo.git(GIT_ASKPASS='echo', GIT_USERNAME=token):
+    origin.pull()
+
+    # with repo.git.custom_environment(GIT_ASKPASS='echo', GIT_USERNAME=token):
+    #    origin.pull()
+
+
+class PushRepoNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "repo_path": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = 'push_repo'
+    CATEGORY = 'ETK/git'
+
+
+def push_repo(self, **kwargs):
+    kwargs = copy.deepcopy(kwargs)
+    repo_path = kwargs.get('repo_path')
+    token = kwargs.get('token')
+    repo = Repo(repo_path)
+    origin = repo.remotes.origin
+    # with repo.git.custom_environment(GIT_ASKPASS='echo', GIT_USERNAME=token):
+    origin.push()
 
 
 class SendCommitNode:
-    """Sends a commit to a public Git repository"""
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "repo_path": ("STRING", {"multiline": False}),  # Added repo_path input
-                "commit_message": ("STRING", {"multiline": False})  # Added commit_message input
+                "repo_path": ("STRING", {"multiline": False, "default": ""}),
+                "commit_message": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
             }
         }
 
-    CATEGORY = "ETK/git"
-    RETURN_TYPES = ("NONE",)
-    FUNCTION = "send_commit"
+    RETURN_TYPES = ()
+    FUNCTION = 'send_commit'
+    CATEGORY = 'ETK/git'
 
-    def send_commit(self, **kwargs):
-        repo_path = kwargs.get("repo_path", None)
-        commit_message = kwargs.get("commit_message", None)
 
-        repo = git.Repo(repo_path)
-        repo.git.add(all=True)
-        repo.index.commit(commit_message)
-        repo.remotes.origin.push()
+def send_commit(self, **kwargs):
+    kwargs = copy.deepcopy(kwargs)
+    repo_path = kwargs.get('repo_path')
+    commit_message = kwargs.get('commit_message')
+    repo = Repo(repo_path)
+    repo.git.add(A=True)
+    repo.index.commit(commit_message)
 
 
 class CreateRepoNode:
-    """Creates a new local Git repository at a given subdirectory"""
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "subdirectory": ("STRING", {"multiline": False})  # Added subdirectory input
+                "path": ("STRING", {"multiline": False, "default": ""}),
+                "token": ("STRING", {"multiline": False, "default": ""}),
             }
         }
 
-    CATEGORY = "ETK/git"
-    RETURN_TYPES = ("NONE",)
-    FUNCTION = "create_repo"
-
-    def create_repo(self, **kwargs):
-        subdirectory = kwargs.get("subdirectory", None)
-
-        repo = git.Repo.init(subdirectory)
+    RETURN_TYPES = ()
+    FUNCTION = 'create_repo'
+    CATEGORY = 'ETK/git'
 
 
-class TestCreateRepoNode:
-    def test_create_repo(self):
-        node = CreateRepoNode()
-        node.create_repo(subdirectory="my_repo")
-        # Add assertions or additional test logic here
+def create_repo(self, **kwargs):
+    kwargs = copy.deepcopy(kwargs)
+    path = kwargs.get('path')
+    Repo.init(path)
