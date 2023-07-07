@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 try:
-    from custom_nodes.git import CreateRepoNode
+    from custom_nodes.EternalKernelLiteGraphNodes.git import CreateRepoNode
 except ImportError:
     from custom_nodes.git import CreateRepoNode
 
