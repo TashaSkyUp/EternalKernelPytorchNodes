@@ -1,6 +1,7 @@
 import giturlparse
 import git
 
+
 class PublicGitRepo:
     """replaces the text in the given text string with a given other text at some key positions"""
 
@@ -22,6 +23,7 @@ class PublicGitRepo:
         parsed_url = giturlparse.parse(git_url)
 
         return (git_url,)
+
 
 class SendCommitNode:
     """Sends a commit to a public Git repository"""
