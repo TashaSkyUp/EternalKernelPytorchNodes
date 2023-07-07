@@ -13,7 +13,7 @@ class PublicGitRepo:
             }
         }
 
-    CATEGORY = "text"
+    CATEGORY = "ETK/git"
     RETURN_TYPES = ("STRING",)
     FUNCTION = "validate_git_repo_url"
 
