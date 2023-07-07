@@ -49,3 +49,24 @@ class SendCommitNode:
         repo.git.add(all=True)
         repo.index.commit(commit_message)
         repo.remotes.origin.push()
+
+
+class CreateRepoNode:
+    """Creates a new local Git repository at a given subdirectory"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "subdirectory": ("STRING", {"multiline": False})  # Added subdirectory input
+            }
+        }
+
+    CATEGORY = "ETK/git"
+    RETURN_TYPES = ("NONE",)
+    FUNCTION = "create_repo"
+
+    def create_repo(self, **kwargs):
+        subdirectory = kwargs.get("subdirectory", None)
+
+        repo = git.Repo.init(subdirectory)
