@@ -1,3 +1,9 @@
+"""
+This module provides functions for interacting with Git.
+
+Author: Your Name
+"""
+
 import subprocess
 
 def check_git_status():
