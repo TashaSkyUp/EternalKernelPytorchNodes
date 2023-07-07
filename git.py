@@ -28,4 +28,3 @@ class PublicGitRepo:
         repo.git.add(all=True)
         repo.index.commit(commit_message)
         repo.remotes.origin.push()
-
