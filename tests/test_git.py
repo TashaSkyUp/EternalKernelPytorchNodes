@@ -1,5 +1,9 @@
 import unittest
-from custom_nodes.EternalKernelLiteGraphNodes.git import CreateRepoNode
+try:
+    from custom_nodes.EternalKernelLiteGraphNodes.git import CreateRepoNode
+except:
+    from ..git import CreateRepoNode
+
 
 
 class TestCreateRepoNode(unittest.TestCase):
