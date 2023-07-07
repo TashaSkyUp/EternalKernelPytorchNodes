@@ -23,7 +23,26 @@ class PublicGitRepo:
 
         return (git_url,)
 
-    def send_commit(self, repo_path, commit_message):
+class SendCommitNode:
+    """Sends a commit to a public Git repository"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "repo_path": ("STRING", {"multiline": False}),  # Added repo_path input
+                "commit_message": ("STRING", {"multiline": False})  # Added commit_message input
+            }
+        }
+
+    CATEGORY = "ETK/git"
+    RETURN_TYPES = ("NONE",)
+    FUNCTION = "send_commit"
+
+    def send_commit(self, **kwargs):
+        repo_path = kwargs.get("repo_path", None)
+        commit_message = kwargs.get("commit_message", None)
+
         repo = git.Repo(repo_path)
         repo.git.add(all=True)
         repo.index.commit(commit_message)
