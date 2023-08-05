@@ -1,9 +1,12 @@
 import hashlib
 
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
 _list = {"list": ("LIST",)}
 _func = {"func": ("FUNC", {"default": None})}
 _func_extra = {"func_extra": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y=x()"})}
+_image = {"image": ("IMAGE",)}
 _string = {"string": ("STRING", {"default": None})}
 
 optional = lambda x: {"optional": {k: v for k, v in x.items()}}
@@ -12,6 +15,14 @@ both = lambda a, b: {**a, **b}
 many = lambda *dicts: {k: v for d in dicts for k, v in d.items()}  # non tested
 
 
+def ETK_functional_base(cls):
+    cls.FUNCTION = "func"
+    cls.CATEGORY = "ETK/functional"
+    NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    return cls
+
+
+@ETK_functional_base
 class FuncBase:
     """
     Base class for func nodes
@@ -68,6 +79,7 @@ class FuncBase:
         return (self.func,)
 
 
+@ETK_functional_base
 class FuncRender:
     """
     as input takes a function and a string of code
@@ -122,6 +134,7 @@ class FuncRender:
         return (locals["y_float"], locals["y_string"], locals["y_int"], locals["y_list"],)
 
 
+@ETK_functional_base
 class FuncRenderImage:
     def __init__(self):
         from custom_nodes.EternalKernelLiteGraphNodes.image import common_ksampler, TinyTxtToImg
@@ -157,6 +170,7 @@ class FuncRenderImage:
         return (locals["y"],)
 
 
+@ETK_functional_base
 class ExecWidget:
     import torch
 
@@ -271,6 +285,7 @@ class ExecWidget:
         return m.digest().hex()
 
 
+@ETK_functional_base
 class FuncListToList:
     """runs eval on the given text, with a list as input and output"""
 
@@ -306,6 +321,7 @@ class FuncListToList:
         return (my_locals["y_list"],)
 
 
+@ETK_functional_base
 class FuncStrToStr:
     """runs eval on the given text, with a string as input and outputs a string"""
 
@@ -323,6 +339,7 @@ class FuncStrToStr:
 
     def func(self, **kwargs):
         text = kwargs.get("string", None)
+        x = text
         code = kwargs.get("code", None)
         my_globals = globals()
         my_locals = locals()
@@ -332,6 +349,7 @@ class FuncStrToStr:
         return (my_locals["y"],)
 
 
+@ETK_functional_base
 class FuncStrToList:
     def __init__(self):
         pass
@@ -348,6 +366,7 @@ class FuncStrToList:
     def func(self, **kwargs):
         text = kwargs.get("string", None)
         code = kwargs.get("code", None)
+        x = text
         my_globals = globals()
         my_locals = locals()
 
@@ -356,6 +375,33 @@ class FuncStrToList:
         return (my_locals["y_list"],)
 
 
+@ETK_functional_base
+class FuncListToStr:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = required(both(_list, _text))
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        text = kwargs.get("list", None)
+        code = kwargs.get("code", None)
+        x = text
+        my_globals = globals()
+        my_locals = locals()
+
+        exec(code, my_globals, my_locals)
+
+        return (my_locals["y"],)
+
+
+@ETK_functional_base
 class GetFirstCodeBlock():
     """ returns the first code block in the text which is surrounded with ``` or
     ```python or

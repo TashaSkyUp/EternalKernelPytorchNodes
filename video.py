@@ -352,7 +352,6 @@ class ImageStackToVideoFile(metaclass=WidgetMetaclass):
         except OSError:
             self.CODE = "Unable to get source code"
 
-
         self.FUNC = self.handler
 
         try:
@@ -541,21 +540,20 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
         # Create intermediary frames
         frames = []
         for i in range(k):
-            factor = i  / k
-            #factor = factor * 2 - 1
+            factor = i / k
+            # factor = factor * 2 - 1
 
-            #normalize flow
+            # normalize flow
             n_flow = flow.clone()
             print(n_flow.min(), n_flow.max(), n_flow.dtype)
-            #n_flow[:,0,:,:] = n_flow[:,0,:,:] / (n_flow[:,0,:,:].max() - n_flow[:,0,:,:].min())
-            #n_flow[:,1,:,:] = n_flow[:,1,:,:] / (n_flow[:,1,:,:].max() - n_flow[:,1,:,:].min())
-            #print(n_flow.min(), n_flow.max(), n_flow.dtype)
-            #n_flow[:, 0, :, :] = n_flow[:, 0, :, :] - n_flow[:, 0, :, :].min()
-            #n_flow[:, 1, :, :] = n_flow[:, 1, :, :] - n_flow[:, 1, :, :].min()
-            #print (n_flow.min(), n_flow.max(),n_flow.dtype)
-            n_flow= n_flow/n_flow.shape[2]
+            # n_flow[:,0,:,:] = n_flow[:,0,:,:] / (n_flow[:,0,:,:].max() - n_flow[:,0,:,:].min())
+            # n_flow[:,1,:,:] = n_flow[:,1,:,:] / (n_flow[:,1,:,:].max() - n_flow[:,1,:,:].min())
+            # print(n_flow.min(), n_flow.max(), n_flow.dtype)
+            # n_flow[:, 0, :, :] = n_flow[:, 0, :, :] - n_flow[:, 0, :, :].min()
+            # n_flow[:, 1, :, :] = n_flow[:, 1, :, :] - n_flow[:, 1, :, :].min()
+            # print (n_flow.min(), n_flow.max(),n_flow.dtype)
+            n_flow = n_flow / n_flow.shape[2]
             print(n_flow.min(), n_flow.max(), n_flow.dtype)
-
 
             flow_interpolated = n_flow * factor
             grid = TemporalOpticalFlowSmoothing.make_grid(flow_interpolated)
@@ -567,7 +565,7 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
         return frames
 
     @staticmethod
-    def calculate_optical_flow(image_stack, device,k):
+    def calculate_optical_flow(image_stack, device, k):
         # from torch.multiprocessing import Pool, set_start_method
 
         # set_start_method('spawn')  # set the start method to spawn
@@ -594,8 +592,7 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
             flows.append(keys[0].cpu())
             for f in flow:
                 flows.append(f[0].cpu())
-            #flows.append(keys[1].cpu())
-
+            # flows.append(keys[1].cpu())
 
         return flows
 
@@ -608,7 +605,6 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
 
         image_stack = image_stack.permute(0, 2, 1, 3)
 
-
         # make sure image_stack is a torch tensor and has the right dimensions
         if not torch.is_tensor(image_stack):
             image_stack = torch.tensor(image_stack, dtype=torch.float32)
@@ -620,17 +616,140 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
         image_stack = image_stack.to(device)
 
         # Calculate optical flow
-        flows = self.calculate_optical_flow(image_stack, device,k)
+        flows = self.calculate_optical_flow(image_stack, device, k)
         stack = torch.stack(flows, dim=0)
         # Convert optical flows to images for visualization
         # flow_images = [flow_to_image(flow) for flow in flows]
-        #change back to (b or t,w,h,c)
+        # change back to (b or t,w,h,c)
 
         stack = stack.permute(0, 2, 1, 3)
         return (stack,)
 
 
-if __name__ == "__main__":
-    import doctest
+# TW: Inherit for code reuse, consistency
+import torch
+from torchvision.utils import draw_keypoints
 
-    doctest.testmod()
+
+class MovingCircle(metaclass=WidgetMetaclass):
+    # VideoWidget class definition
+
+    def calculate_start(self, x1, y1, width, height):
+        # Convert to 0-1 range
+        start_x = x1 * width
+        start_y = y1 * height
+        return (start_x, start_y)
+
+    def calculate_end(self, x2, y2, width, height):
+        # Convert to 0-1 range
+        end_x = x2 * width
+        end_y = y2 * height
+        return (end_x, end_y)
+
+    def generate_frames(self, num_frames, width, height):
+        # Match tensor shape from example
+        frames = torch.zeros(num_frames, width, height, 3)
+        return frames
+
+    def draw_circle_or_oval(self, kp, width, height, radius, aspect_ratio, color=(255, 255, 255)):
+        import torch.nn.functional as F
+        # Initialize black background
+        img = torch.zeros((3, height, width), dtype=torch.uint8)
+
+        # Draw circle as keypoints
+        keypoints = torch.tensor([[kp[0], kp[1]]]).unsqueeze(0)
+        img = draw_keypoints(img, keypoints, colors=color, radius=radius)
+
+        # convert to (w,h,c)
+        #img = img.permute(1, 2, 0).unsqueeze(0)
+        img=img.unsqueeze(0)
+
+        # Calculate new size
+        if aspect_ratio < 1:
+            new_size = (height, round(width / aspect_ratio))
+        else:
+            new_size = (round(height * aspect_ratio), width)
+
+        # Stretch the image
+        img_stretched = F.interpolate(img, size=new_size, mode='bilinear', align_corners=False)
+
+        # Shrink it back
+        img_shrunk = F.interpolate(img_stretched, size=(height, width), mode='bilinear', align_corners=False)
+
+        # Convert back to float values
+
+        img_shrunk = img_shrunk.float() / 255
+
+        img_shrunk = img_shrunk.permute(0, 2, 3, 1)
+        return img_shrunk
+
+    def draw_circle(self, kp, width, height, radius, color=(255, 255, 255)):
+        # Initialize black background
+        img = torch.zeros((3, height, width), dtype=torch.uint8)
+        # Draw circle as keypoints
+        keypoints = torch.tensor([[kp[0], kp[1]]]).unsqueeze(0)
+        img = draw_keypoints(img, keypoints, colors=color, radius=radius)
+        # convert to (w,h,c)
+        img = img.permute(1, 2, 0).unsqueeze(0)
+        # convert back to float values
+        img = img.float() / 255
+
+        return img
+
+    # Metadata for documentation
+    RETURN_TYPES = ("IMAGE",)
+    CATEGORY = "ETK/video"
+    FUNCTION = "handler"
+
+    # Match parent class method
+    @classmethod
+    def INPUT_TYPES(cls):
+        # Validate types, ranges
+        return {"required":
+            {
+                "x1": ("FLOAT", {"min": 0, "max": 1, "step": 0.1}),
+                "y1": ("FLOAT", {"min": 0, "max": 1, "step": 0.1}),
+                "x2": ("FLOAT", {"min": 0, "max": 1, "step": 0.1}),
+                "y2": ("FLOAT", {"min": 0, "max": 1, "step": 0.1}),
+                "num_frames": ("INT", {"min": 1}),
+                "width": ("INT", {"min": 1}),
+                "height": ("INT", {"min": 1}),
+                "radius": ("INT", {"min": 1}),
+                "color": ("STRING", {"default": "255 255 255"}),
+                "aspect_ratio": ("FLOAT", {"min": 0.1, "max": 10})
+
+            }}
+
+    def handler(self, x1, y1, x2, y2, num_frames, width, height, radius, color="255 255 255", aspect_ratio=1):
+        import torch
+        # Avoid errors on bad values
+        assert 0 <= x1 <= 1
+        assert 0 <= y1 <= 1
+
+        # Split calculations
+        start = torch.tensor(self.calculate_start(x1, y1, width, height))
+
+        # Split calculations
+        end = torch.tensor(self.calculate_end(x2, y2, width, height))
+
+        # color is supposed to be a tuple
+        color = tuple(map(lambda x:int(x), color.split()))
+        # Initialize for compositing
+
+        frames = []
+        for i in range(num_frames):
+            # Leverage PyTorch
+            cur_pos = start + (end - start) * i / num_frames
+            circle = self.draw_circle_or_oval(cur_pos, width, height, radius, aspect_ratio, color)
+            # Use broadcasting to overlay
+            frames.append(circle)
+
+        # cat
+        frames = torch.cat(frames, dim=0)
+
+        return (frames,)
+
+    if __name__ == "__main__":
+        import doctest
+
+        doctest.testmod()

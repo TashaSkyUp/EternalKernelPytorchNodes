@@ -1,5 +1,10 @@
 import os
 
+try:
+    from utils import etk_deep_copy as deepcopy
+except ImportError as e:
+    from custom_nodes.EternalKernelLiteGraphNodes.utils import etk_deep_copy as deepcopy
+
 testing = os.environ.get("ETERNAL_KERNEL_LITEGRAPH_NODES_TEST", None)
 if testing == "True":
     testing = True
@@ -55,6 +60,15 @@ all image inputs are (B,W,H,C)
 
 avoid numpy and PIL as much as possible
 """
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
+
+
+def ETK_image_base(cls):
+    # cls.FUNCTION = "func"
+    cls.CATEGORY = "ETK/Image"
+    NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    return cls
 
 
 def get_fonts():
@@ -137,24 +151,26 @@ def torch_image_show(image):
         # try to rearrange the channels using np
         image = np.moveaxis(image, 0, -1)
 
-        #image.permute(1, 2, 0)
+        # image.permute(1, 2, 0)
         image = Image.fromarray(image)  # Create a PIL image
 
     image.show()
 
 
+@ETK_image_base
 class TinyTxtToImg:
     """small text to image generator"""
     share_clip = None
     share_mdl = None
     share_vae = None
+
     def __init__(self):
+        print("ETK> TinyTxtToImg init")
         import random
         self.mdl = None
         self.clp = None
         self.vae = None
         self.vision = None
-        self.seed = random.randint(0, 2 ** 32 - 1)
         self.steps = 10
         self.cfg = 8
         self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
@@ -168,7 +184,6 @@ class TinyTxtToImg:
         self.latent_image = None
         self.samples = None
 
-
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -179,7 +194,7 @@ class TinyTxtToImg:
                 "token_normalization": (["none", "mean", "length", "length+mean"],),
                 "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],),
                 "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
-
+                "one_seed": ([True, False], {"default": False}),
 
             },
             "optional": {
@@ -194,29 +209,44 @@ class TinyTxtToImg:
 
     CATEGORY = "ETK"
 
-    RETURN_TYPES = ("IMAGE", "FUNC",)
+    RETURN_TYPES = ("IMAGE", "FUNC", "LATENT", "CONDITIONING", "CONDITIONING",)
+    RETURN_NAMES = ("image", "FUNC", "latent", "positive", "negative",)
     FUNCTION = "tinytxt2img"
 
-    def tinytxt2img(self, prompt, neg_prompt, name="tinytxt2img", overrides: str = "",
-                    clip_encoder="comfy -ignore below",
-                    token_normalization="length+mean",
-                    weight_interpretation="comfy++",
-                    FUNC: callable = None,
-                    ckpt_name="v1-5-pruned-emaonly.safetensors",
-                    ):
+    def tinytxt2img(self, **kwargs):
         """ use the imports from nodes to generate an image from text """
 
         import random
         import json
 
-        if not hasattr( TinyTxtToImg, "share_mdl"):
+        # kwargs = deepcopy(kwargs)
+
+        prompt = kwargs.get("prompt", "")
+        neg_prompt = kwargs.get("neg_prompt", "")
+        clip_encoder = kwargs.get("clip_encoder", "comfy -ignore below")
+        token_normalization = kwargs.get("token_normalization", "length+mean")
+        weight_interpretation = kwargs.get("weight_interpretation", "comfy++")
+        ckpt_name = kwargs.get("ckpt_name", "v1-5-pruned-emaonly.safetensors")
+        overrides = kwargs.get("overrides", "")
+        name = kwargs.get("name", "tinytxt2img")
+        FUNC = kwargs.get("FUNC", None)
+        self.latent_image = kwargs.get("latent", None)
+        self.pos_cond = kwargs.get("pos_cond", None)
+        self.neg_cond = kwargs.get("neg_cond", None)
+        self.seed = kwargs.get("seed", random.randint(0, 2 ** 32 - 1))
+        self.one_seed_per_batch = kwargs.get("one_seed", False)
+        self.denoise = kwargs.get("denoise", 1.0)
+
+        if not hasattr(TinyTxtToImg, "share_mdl"):
             TinyTxtToImg.share_mdl = None
+            TinyTxtToImg.share_mdl_ckpt_name = None
 
         if TinyTxtToImg.share_mdl is None:
             self.mdl, self.clp, self.vae, self.vision = \
                 CheckpointLoaderSimple.load_checkpoint(None,
                                                        ckpt_name=ckpt_name
                                                        )
+            TinyTxtToImg.share_mdl_ckpt_name = ckpt_name
             CSL = TinyTxtToImg
             CSL.share_mdl = self.mdl
             CSL.share_clip = self.clp
@@ -224,12 +254,25 @@ class TinyTxtToImg:
             CSL.share_vision = self.vision
 
         else:
-            self.mdl, self.clp, self.vae = (TinyTxtToImg.share_mdl,
-                                            TinyTxtToImg.share_clip,
-                                            TinyTxtToImg.share_vae
-                                            )
+            # check if the checkpoint is the same
+            if TinyTxtToImg.share_mdl_ckpt_name != ckpt_name:
+                self.mdl, self.clp, self.vae, self.vision = \
+                    CheckpointLoaderSimple.load_checkpoint(None,
+                                                           ckpt_name=ckpt_name
+                                                           )
+                TinyTxtToImg.share_mdl_ckpt_name = ckpt_name
+                CSL = TinyTxtToImg
+                CSL.share_mdl = self.mdl
+                CSL.share_clip = self.clp
+                CSL.share_vae = self.vae
+                CSL.share_vision = self.vision
+            else:
 
-        self.seed = random.randint(0, 2 ** 32 - 1)
+                self.mdl, self.clp, self.vae = (TinyTxtToImg.share_mdl,
+                                                TinyTxtToImg.share_clip,
+                                                TinyTxtToImg.share_vae
+                                                )
+
         self.steps = 10
         self.cfg = 8
         self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
@@ -239,8 +282,8 @@ class TinyTxtToImg:
         self.width = 512
         self.height = 512
         self.batch_size = 1
-        self.denoise = 1.0
-        self.one_seed_per_batch = False
+        if not self.denoise:
+            self.denoise = 1.0
 
         if overrides:
             if overrides != "":
@@ -256,45 +299,61 @@ class TinyTxtToImg:
         ## TODO: probably need to prepare the execution better to make sure that applying the incomming func can change everything
         if FUNC is not None:
             self.__dict__.update(FUNC(self.__dict__))
-        if clip_encoder == "comfy -ignore below":
-            self.pos_cond = CLIPTextEncode.encode(None, self.clp, self.positive)[0]
-            self.neg_cond = CLIPTextEncode.encode(None, self.clp, self.negative)[0]
 
-        elif clip_encoder == "advanced":
-            try:
-                self.pos_cond = CLIPTextEncodeAdvanced.encode(None,
-                                                              self.clp,
-                                                              self.positive,
-                                                              token_normalization,
-                                                              weight_interpretation)[0]
-                self.neg_cond = CLIPTextEncodeAdvanced.encode(None,
-                                                              self.clp,
-                                                              self.negative,
-                                                              token_normalization,
-                                                              weight_interpretation)[0]
-            except Exception as e:
-                print(e)
-                raise ValueError("advanced clip encoder failed")
+        if not self.pos_cond:
+            if clip_encoder == "comfy -ignore below":
+                self.clp_encode = lambda x: CLIPTextEncode.encode(None, self.clp, x)[0]
+                self.pos_cond = self.clp_encode(self.positive)
+                self.neg_cond = self.clp_encode(self.negative)
 
-        self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
+            elif clip_encoder == "advanced":
+                self.clp_encode = lambda x: CLIPTextEncodeAdvanced.encode(None,
+                                                                          self.clp,
+                                                                          x,
+                                                                          token_normalization,
+                                                                          weight_interpretation)[0]
+                try:
+                    self.pos_cond = self.clp_encode(self.positive)
+                    self.neg_cond = self.clp_encode(self.negative)
 
-        samples = KSampler.sample(None,
-                                  self.mdl,
-                                  self.seed, self.steps, self.cfg, self.sampler_name, self.scheduler,
-                                  self.pos_cond, self.neg_cond,
-                                  self.latent_image,
-                                  denoise=self.denoise,
-                                  one_seed_per_batch=self.one_seed_per_batch)[0]
+                except Exception as e:
+                    print(e)
+                    raise ValueError("advanced clip encoder failed")
 
-        image = VAEDecode.decode(None, self.vae, samples)[0]
+        if not self.latent_image:
+            self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
+
+        self.KSampler = KSampler()
+        self.samples = self.KSampler.sample(
+            model=self.mdl,
+            seed=self.seed,
+            steps=self.steps,
+            cfg=self.cfg,
+            sampler_name=self.sampler_name,
+            scheduler=self.scheduler,
+            latent_image=self.latent_image,
+            pos_cond=self.pos_cond,
+            neg_cond=self.neg_cond,
+            positive=self.pos_cond,
+            negative=self.neg_cond,
+            denoise=self.denoise,
+            one_seed_per_batch=self.one_seed_per_batch)[0]
+        # self.vae.offload_device = torch.device("cuda")
+        image = VAEDecode.decode(None, self.vae, self.samples)[0]
         image = image.detach().cpu()
         self.FUNC = self.tinytxt2img
-        self.ARGS = (prompt, neg_prompt, name, overrides, clip_encoder, token_normalization, weight_interpretation, FUNC)
-        return (image,
-                self
-                ,)
+        self.ARGS = kwargs
+        ret = (image,
+               self,
+               self.samples,
+               self.pos_cond,
+               self.neg_cond
+               ,)
+        # ret = deepcopy(ret)
+        return ret
 
 
+@ETK_image_base
 class PreviewImageTest(SaveImage):
     def __init__(self):
         self.output_dir = folder_paths.get_temp_directory()
@@ -327,8 +386,7 @@ class PreviewImageTest(SaveImage):
         return my_ret
 
 
-
-
+@ETK_image_base
 class PromptTemplate:
     """replaces the text in the given text string with a given other text at some key positions"""
 
@@ -354,6 +412,7 @@ class PromptTemplate:
         return (text.replace(key1, replacement),)
 
 
+@ETK_image_base
 class LoadImage:
     @classmethod
     def INPUT_TYPES(s):
@@ -452,6 +511,7 @@ class LoadImage:
         return m.digest().hex()
 
 
+@ETK_image_base
 class SelectFromRGBSimilarity:
     """
     selects pixel positions based on similarity to a given color
@@ -556,6 +616,7 @@ class SelectFromRGBSimilarity:
         return (out,)
 
 
+@ETK_image_base
 class Quantize:
     def __init__(self):
         pass
@@ -626,6 +687,7 @@ class Quantize:
         return (result,)
 
 
+@ETK_image_base
 class select_from_batch:
     """selects a single image from a batch"""
 
@@ -686,6 +748,7 @@ class select_from_batch:
         return (oimg, olat,)
 
 
+@ETK_image_base
 class ImageDistanceMask:
     def __init__(self):
         pass
@@ -773,6 +836,7 @@ class ImageDistanceMask:
         return (dist,)
 
 
+@ETK_image_base
 class rgba_lower_clip:
     """Clip RGBA values below a threshold"""
 
@@ -844,6 +908,65 @@ class rgba_lower_clip:
         return (image,)
 
 
+@ETK_image_base
+class ImageStackBlendByMask:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "stack a": ("IMAGE",),
+                "stack b": ("IMAGE",),
+                "img mask": ("IMAGE",),
+
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "IMAGE",)
+    RETURN_NAMES = ("image", "image rgba")
+    FUNCTION = "stack_mask"
+
+    CATEGORY = "ETK/Image"
+
+    def stack_mask(self, **kwargs):
+        import torch
+        # use torch to blend two images by a mask
+        # stacks are already (B,W,H,C)
+
+        stack_a = kwargs["stack a"]
+        stack_b = kwargs["stack b"]
+        img_mask = kwargs["img mask"]
+        # check if they all have alpha
+        if stack_a.shape[3] == 3:
+            alpha = torch.ones_like(stack_a[:, :, :, 0])
+            stack_a = torch.cat((stack_a, alpha.unsqueeze(3)), dim=3)
+
+        if stack_b.shape[3] == 3:
+            alpha = torch.ones_like(stack_b[:, :, :, 0])
+            stack_b = torch.cat((stack_b, alpha.unsqueeze(3)), dim=3)
+
+        # allocate new image
+        new_image = torch.zeros_like(stack_a)
+
+        # blend rgb channels
+
+        for i in range(3):
+            new_image[:, :, :, i] = \
+                (stack_a[:, :, :, i] * img_mask[:, :, :, 0]) \
+                + \
+                (stack_b[:, :, :, i] * (1 - img_mask[:, :, :, 0]))
+
+        # alpha should be the mean of the two alphas
+        new_image[:, :, :, 3] = (stack_a[:, :, :, 3] + stack_b[:, :, :, 3]) / 2
+        rgba = new_image
+        rgb = new_image[:, :, :, 0:3]
+
+        return (rgb, rgba,)
+
+
+@ETK_image_base
 class rgba_upper_clip:
     """Clip RGBA values above a threshold"""
 
@@ -915,6 +1038,7 @@ class rgba_upper_clip:
         return (image,)
 
 
+@ETK_image_base
 class RGBA_MOD:
     """provide sliders to modify RGBA values"""
 
@@ -975,6 +1099,7 @@ class RGBA_MOD:
         return (image,)
 
 
+@ETK_image_base
 class ImageBC:
     """Normalize an images brightness,droping lower and higher values of n perctile"""
 
@@ -1046,6 +1171,7 @@ class ImageBC:
         return (image,)
 
 
+@ETK_image_base
 class PadToMatch:
     """ a node that will pad the smaller of two images to match the size of the larger one """
 
@@ -1124,6 +1250,7 @@ class PadToMatch:
         return (padded1, padded2)
 
 
+@ETK_image_base
 class StackImages:
     """ a node that will stack two images on top of each other """
 
@@ -1139,6 +1266,9 @@ class StackImages:
             "optional": {
                 "image2": ("IMAGE",),
                 "number_of_images": ("INT", {"default": 2, "min": 2, "max": 100}),
+                # an optionbox with "all" or "upto", model after "one seed per batch" in the sampler
+                "mode": (["all", "upto"], {"default": "all"}),
+
             }, }
 
     RETURN_TYPES = ("IMAGE",)
@@ -1146,7 +1276,7 @@ class StackImages:
 
     CATEGORY = "ETK/image"
 
-    def stackme(self, image1, image2=None, number_of_images=2):
+    def stackme(self, image1, image2=None, number_of_images=2, mode="all"):
         """
         stacks two images on top of each other
         images are (B, W, H, C) torch tensors
@@ -1159,15 +1289,21 @@ class StackImages:
         else:
             stacked = torch.cat((image1, image1), dim=0)
 
-        if number_of_images > 2:
-            while stacked.shape[0] < number_of_images:
-                stacked = torch.cat((stacked, stacked), dim=0)
-            print(stacked.shape)
-        out = stacked[:number_of_images, :, :, :]
-        print(out.shape)
+        if mode == "all":
+            if number_of_images > 2:
+                while stacked.shape[0] < number_of_images:
+                    stacked = torch.cat((stacked, stacked), dim=0)
+                print(stacked.shape)
+                out = stacked[:number_of_images, :, :, :]
+            else:
+                # stack them all together regardless of the first dimension
+                out = torch.cat((image1, image2), dim=0)
+                print(stacked.shape)
+
         return (out,)
 
 
+@ETK_image_base
 class rgba_merge:
     """merges the channels of an RGBA image"""
 
@@ -1215,6 +1351,7 @@ class rgba_merge:
         return (torch.cat((r, g, b, a), dim=3),)
 
 
+@ETK_image_base
 class rgba_split:
     """splits the channels of an RGBA image"""
 
@@ -1266,6 +1403,73 @@ def get_image_size(image):
     return (width * height)
 
 
+@ETK_image_base
+class KSamplerCreateDataset:
+    """ use KSampler to create a dataset """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        inps = KSampler.INPUT_TYPES()
+        # make sure to set a default
+        inps["required"]["dataset_name"] = ("STRING", {"default": "dataset"})
+        return inps
+
+    CATEGORY = "ETK/training"
+
+    RETURN_TYPES = ("LATENT", "STRING",)
+    RETURN_NAMES = ("LATENT", "dataset_path",)
+
+    FUNCTION = "create_dataset"
+
+    def create_dataset(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                       denoise, one_seed_per_batch, dataset_name):
+        """
+        creates a dataset using KSampler
+        :param model:
+        :param seed:
+        :param steps:
+        :param cfg:
+        :param sampler_name:
+        :param scheduler:
+        :param positive:
+        :param negative:
+        :param latent_image:
+        :param denoise:
+        :param dataset_name:
+        :return:
+        """
+        # create the sampler
+        sampler = KSampler()
+
+        x = {"model": model, "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": sampler_name,
+             "scheduler": scheduler, "positive": positive, "negative": negative, "latent_image": latent_image,
+             "denoise": denoise, "one_seed_per_batch": one_seed_per_batch}
+
+        # now save x
+        # just use torch .save?
+        import torch
+        # create a random name
+        import hashlib
+        import time
+
+        # create a random name
+        name = hashlib.md5(str(time.time()).encode()).hexdigest()[0:8]
+        name = dataset_name + "_" + name
+
+        o = folder_paths.get_output_directory()
+        import os
+
+        dataset_path = os.path.join(o, name)
+        torch.save(x, dataset_path + "_x.pt")
+
+        results = sampler.sample(**x)
+        # save the results
+        torch.save(results[0], dataset_path + "_y.pt")
+        # return the dataset path
+        return (results[0], dataset_path,)
+
+
+@ETK_image_base
 class KSampler:
     @classmethod
     def INPUT_TYPES(s):
@@ -1283,20 +1487,38 @@ class KSampler:
                      "one_seed_per_batch": ([True, False], {"default": False}),
                      }}
 
-    RETURN_TYPES = ("LATENT",)
+    RETURN_TYPES = ("LATENT", "FUNC",)
     FUNCTION = "sample"
 
     CATEGORY = "sampling"
 
-    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0,
-               one_seed_per_batch=False):
-        try:
-            return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                               denoise=denoise,one_seed_per_batch=one_seed_per_batch)
-        except TypeError as e:
-            return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                   denoise=denoise)
+    def sample(self, **kwargs):
 
+        kwargs = deepcopy(kwargs)
+
+        model = kwargs.get("model", None)
+        seed = kwargs.get("seed", None)
+        steps = kwargs.get("steps", None)
+        cfg = kwargs.get("cfg", None)
+        sampler_name = kwargs.get("sampler_name", None)
+        scheduler = kwargs.get("scheduler", None)
+        positive = kwargs.get("positive", None)
+        negative = kwargs.get("negative", None)
+        latent_image = kwargs.get("latent_image", None)
+        denoise = kwargs.get("denoise", None)
+        one_seed_per_batch = kwargs.get("one_seed_per_batch", None)
+
+        self.FUNC = lambda x: KSampler.sample(self, **x)
+        self.ARGS = kwargs
+
+        try:
+            ret = common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                  denoise=denoise, one_seed_per_batch=one_seed_per_batch)
+        except TypeError as e:
+            ret = common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                  denoise=denoise)
+        ret = (ret[0], self,)
+        return ret
 
 
 from PIL import Image, ImageDraw, ImageFont
@@ -1304,6 +1526,7 @@ import torch
 import numpy as np
 
 
+@ETK_image_base
 class TextRender:
     """
     renders text to an image
@@ -1357,6 +1580,7 @@ class TextRender:
     CATEGORY = "ETK/text"
 
     RETURN_TYPES = ("IMAGE", "IMAGE",)
+    RETURN_NAMES = ("image", "image rgba",)
 
     FUNCTION = "render_text"
 
@@ -1476,6 +1700,70 @@ class TextRender:
         return y_offset
 
 
+@ETK_image_base
+class StripAlphaChannel:
+    """
+    This function strips the alpha channel from the image.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        reqd = {"required": {"image": ("IMAGE",)}}
+        return reqd
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+
+    FUNCTION = "strip_alpha_channel"
+
+    def strip_alpha_channel(self, image):
+        """
+        This function strips the alpha channel from the image.
+
+        >>> sac = StripAlphaChannel()
+        >>> result = sac.strip_alpha_channel(image)
+        >>> torch_image_show(result[0])
+        """
+
+        return (deepcopy(image[..., :3]),)
+
+
+@ETK_image_base
+class FuncImageStackToImageStack:
+    """ runs exec on giving the user the input image stack and the ability to define the output image stack"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = {"required": {
+            "image": ("IMAGE",),
+            "code": ("STRING", {"multiline": True, "default": "y=x()"})
+        }}
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        func = kwargs.get("func", None)
+        code = kwargs.get("code", None)
+        my_globals = globals()
+        my_locals = locals()
+
+        image_x = kwargs.get("image", None)
+        gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
+
+        my_locals["x"] = func
+        my_locals["x_image"] = kwargs.get("image", None)
+
+        exec(code, my_globals, my_locals)
+
+        return (my_locals["y_image"],)
+
+
 if __name__ == "__main__":
     # test TextRender
     tr = TextRender()
@@ -1483,8 +1771,10 @@ if __name__ == "__main__":
     torch_image_show(result)
     print(result.shape)
 
+
 def main():
     pass
+
 
 if __name__ == "__main__":
     main()

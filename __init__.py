@@ -29,7 +29,7 @@ OLD_NODE_CLASS_MAPPINGS = {
 OLD_NODE_CLASS_MAPPINGS = {v: k for k, v in OLD_NODE_CLASS_MAPPINGS.items()}
 
 NODE_CLASS_MAPPINGS = {}
-
+NODE_DISPLAY_NAME_MAPPINGS = {}
 # Try importing optional dependencies
 
 
@@ -44,35 +44,33 @@ else:  # if not a unit test
         print("ETK> Failed to import comfy.samplers, assuming no comfyui skipping SD related nodes")
 
     # Load classes from modules in the custom_nodes.EternalKernelLiteGraphNodes package
-    package_dir = os.path.dirname(os.path.abspath(__file__))
-    package_name = "custom_nodes.EternalKernelLiteGraphNodes"
-    for module_file in os.listdir(package_dir):
-        if module_file.endswith('.py') and not module_file.startswith('__'):
-            module_name = package_name + '.' + module_file[:-3]  # Removing .py extension
-            try:
-                # import directly from the file
-                full_path = os.path.join(package_dir, module_file)
-                with open(full_path, 'r') as f:
-                    code = f.read()
-                exec(code, globals(), locals())
-                for class_name in dir():
-                    class_obj = locals()[class_name]
-                    if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):
-                        NODE_CLASS_MAPPINGS[class_name] = class_obj
+    folder = os.path.dirname(os.path.abspath(__file__))
 
-                # module = importlib.import_module(module_name)
-                # for class_name in dir(module):
-                #    class_obj = getattr(module, class_name)
-                #    if isinstance(class_obj, type) and hasattr(class_obj, 'INPUT_TYPES'):  # Checking if it's a class and has INPUT_TYPES attribute
-                #        NODE_CLASS_MAPPINGS[class_name] = class_obj
+    for file in os.listdir(folder):
+        if file == "nodes.py":
+            raise ValueError("nodes.py is not an allowed name in this folder")
+        if file.endswith(".py") and file[0] != "_":
+            # import the NODE_CLASS_MAPPINGS from the file
+            try:
+                module = importlib.import_module(f".{file[:-3]}",  __name__)
             except ImportError:
-                if not use_generic_nodes:
-                    print(f"Failed to import {module_name}, it may require comfy.samplers. Skipping...")
+                try:
+                    module = importlib.import_module(f"{file[:-3]}")  # needed for testing?
+                except ModuleNotFoundError:
+                    module = importlib.import_module(f".{file[:-3]}", __name__)
+
+            if hasattr(module, "NODE_CLASS_MAPPINGS"):
+                mappings = module.NODE_CLASS_MAPPINGS
+                NODE_CLASS_MAPPINGS.update(mappings)
+                print(f"ETK: updated with {mappings}")
+
+            if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS"):
+                NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
 
     # use OLD_NODE_CLASS_MAPPINGS to add the old names to the new nodes
     new_node_class_mappings = {}
     for k, v in OLD_NODE_CLASS_MAPPINGS.items():
-        if NODE_CLASS_MAPPINGS[k]:
+        if k in NODE_CLASS_MAPPINGS:
             new_node_class_mappings[v] = NODE_CLASS_MAPPINGS[k]
             # mark it for removeal
             NODE_CLASS_MAPPINGS[k] = None

@@ -1,10 +1,20 @@
 from git import Repo, InvalidGitRepositoryError
 import os
 import copy
-
 import re
 
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
 
+
+def ETK_git_base(cls):
+    cls.FUNCTION = "func"
+    cls.CATEGORY = "ETK/git"
+    NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    return cls
+
+
+@ETK_git_base
 class PublicGitRepo:
     @classmethod
     def INPUT_TYPES(cls):
@@ -33,6 +43,7 @@ def validate_git_repo_url(self, **kwargs):
     return match is not None and match.group() == repo_url
 
 
+@ETK_git_base
 class CloneRepoNode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -45,7 +56,7 @@ class CloneRepoNode:
         }
 
     RETURN_TYPES = ("STRING", "STRING", "LIST",)
-    RETURN_NAMES = ("path_passthrough","file_structure", "file_list",)
+    RETURN_NAMES = ("path_passthrough", "file_structure", "file_list",)
     FUNCTION = 'clone_repo'
     CATEGORY = 'ETK/git'
 
@@ -61,6 +72,7 @@ class CloneRepoNode:
         return ("".join(ld), ld,)
 
 
+@ETK_git_base
 class PullRepoNode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -89,6 +101,7 @@ def pull_repo(self, **kwargs):
     #    origin.pull()
 
 
+@ETK_git_base
 class PushRepoNode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -114,6 +127,7 @@ def push_repo(self, **kwargs):
     origin.push()
 
 
+@ETK_git_base
 class SendCommitNode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -139,6 +153,7 @@ def send_commit(self, **kwargs):
     repo.index.commit(commit_message)
 
 
+@ETK_git_base
 class CreateRepoNode:
     @classmethod
     def INPUT_TYPES(cls):
