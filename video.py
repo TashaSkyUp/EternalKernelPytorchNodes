@@ -14,6 +14,15 @@ import torch
 from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
 from torch import dtype
 from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
+from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
+import imageio_ffmpeg as ffmpeg
+import os
+import torch
+from torchvision.utils import draw_keypoints
+from skimage.metrics import structural_similarity as ssim
+import cv2
+import numpy as np
+import cv2
 
 NODE_CLASS_MAPPINGS = {}  # this is the dictionary that will be used to register the nodes
 
@@ -46,11 +55,11 @@ def video_files(s):
 
 # start with an ABC to define the common widget interface
 
-class WidgetMetaclass(ABCMeta):
+class ABCWidgetMetaclass(ABCMeta):
     """A metaclass that automatically registers classes."""
 
     def __init__(cls, name, bases, attrs):
-        if (ABC in bases) or (VideoWidget in bases):
+        if (ABC in bases) or (ABCVideoWidget in bases) or ("ABC" in name):
             pass
         else:
             NODE_CLASS_MAPPINGS[name] = cls
@@ -58,7 +67,7 @@ class WidgetMetaclass(ABCMeta):
         super().__init__(name, bases, attrs)
 
 
-class VideoWidget(ABC, metaclass=WidgetMetaclass):
+class ABCVideoWidget(ABC, metaclass=ABCWidgetMetaclass):
     """Abstract base class for simple construction"""
 
     input_dir = video_dir
@@ -80,7 +89,7 @@ class VideoWidget(ABC, metaclass=WidgetMetaclass):
         pass
 
 
-class VideoFileToVideoFolder(VideoWidget, metaclass=WidgetMetaclass):
+class ABCVideoFileToABCVideoFolder(ABCVideoWidget, metaclass=ABCWidgetMetaclass):
     """Abstract base class for simple construction"""
 
     @classmethod
@@ -102,7 +111,7 @@ class VideoFileToVideoFolder(VideoWidget, metaclass=WidgetMetaclass):
         return (one, two,)
 
 
-class VideoFolderToImage(VideoWidget, metaclass=WidgetMetaclass):
+class ABCABCVideoFolderToImage(ABCVideoWidget, metaclass=ABCWidgetMetaclass):
     """Abstract base class for simple construction"""
     RETURN_TYPES = ("IMAGE",)
 
@@ -110,11 +119,11 @@ class VideoFolderToImage(VideoWidget, metaclass=WidgetMetaclass):
     def INPUT_TYPES(cls):
         return {"required":
             {
-                "folder_in": (video_folders(cls),),
-                "idx_slice_start": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 0}),
-                "idx_slice_stop": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 1}),
-                "slice_idx_step": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
-                "idx": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 0}),
+                "folder_in": ("STRING", {"default": "full_path_to_folder"}),
+                "idx_slice_start": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
+                "idx_slice_stop": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 1}),
+                "slice_idx_step": ("INT", {"min": 0, "max": 9999, "step": 1, "default": 1}),
+                "idx": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
             },
 
             "optional":
@@ -128,7 +137,7 @@ class VideoFolderToImage(VideoWidget, metaclass=WidgetMetaclass):
         return (one,)
 
 
-class VideoFileToImage(VideoWidget, metaclass=WidgetMetaclass):
+class ABCABCVideoFileToImage(ABCVideoWidget, metaclass=ABCWidgetMetaclass):
     """Abstract base class for simple construction"""
     RETURN_TYPES = ("IMAGE",)
 
@@ -136,11 +145,11 @@ class VideoFileToImage(VideoWidget, metaclass=WidgetMetaclass):
     def INPUT_TYPES(cls):
         return {"required":
             {
-                "video_in": (video_files(cls),),
-                "idx_slice_start": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 0}),
-                "idx_slice_stop": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 1}),
-                "slice_idx_step": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
-                "idx": ("INT", {"min": 0, "max": 10000, "step": 1, "default": 0}),
+                "video_in": ("STRING", {"default": "full_path_to_video"}),
+                "idx_slice_start": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
+                "idx_slice_stop": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 1}),
+                "slice_idx_step": ("INT", {"min": 0, "max": 9999, "step": 1, "default": 1}),
+                "idx": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
             },
 
             "optional":
@@ -156,7 +165,7 @@ class VideoFileToImage(VideoWidget, metaclass=WidgetMetaclass):
 
 ## end of abstract base classes ##
 
-class VideoToFrames(VideoFileToVideoFolder, metaclass=WidgetMetaclass):
+class VideoToFramesFolder(ABCVideoFileToABCVideoFolder, metaclass=ABCWidgetMetaclass):
     """use cv2 to open the video and use it as a source for image stacks"""
 
     RETURN_TYPES = ("IMAGE",)
@@ -181,41 +190,217 @@ class VideoToFrames(VideoFileToVideoFolder, metaclass=WidgetMetaclass):
         return (folder_out,)
 
 
-class VideoFramesToImageStack(VideoFolderToImage, metaclass=WidgetMetaclass):
+class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
     """Use cv2 to open the video and save the videos individual frames"""
 
-    def handler(self, folder_in, text, idx_slice_start, idx_slice_stop, slice_idx_step, idx):
+    @classmethod
+    def INPUT_TYPES(cls):
+        from addict import Dict
+        ret = Dict()
+        ret.required = Dict()
+        ret.required.folder_in = ("STRING", {"default": "full_path_to_folder"})
+        ret.required.use_subfolders = ([True, False], {"default": False})
+        ret.required.by_date_or_name = (["DATE", "NAME"], {"default": "DATE"})
+        ret.required.idx_slice_start = ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0})
+        ret.required.idx_slice_stop = ("INT", {"min": 0, "max": 99999, "step": 1, "default": 1})
+        ret.required.slice_idx_step = ("INT", {"min": 0, "max": 9999, "step": 1, "default": 1})
+        ret.required.idx = ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0})
+        ret.required.use_float16 = ([True, False], {"default": False})
+
+        return ret
+
+    CATEGORY = "video"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "handler"
+
+    @torch.inference_mode()
+    def handler(self, folder_in,
+                use_subfolders,
+                by_date_or_name,
+                idx_slice_start,
+                idx_slice_stop,
+                slice_idx_step,
+                idx,
+                use_float16
+                ):
         """
         Return slices of time from the video, sequences of images, defined by the start, stop and step
         - torch tensors (T,H,W,C)
         """
-        import glob
 
-        folder_in_path = os.path.join(self.input_dir, folder_in)
+        import glob
+        idx = idx * slice_idx_step
+
+        folder_in_path = folder_in
         image_list = []
 
+        p = os.path.abspath(folder_in_path)
         # List and sort all PNG or JPG files in the folder
-        file_fps = sorted(
-            glob.glob(os.path.join(folder_in_path, '*.png')) + glob.glob(os.path.join(folder_in_path, '*.jpg')))
+        if not use_subfolders and by_date_or_name == "NAME":
+            file_fps = sorted(
+                glob.glob(os.path.join(p, '*.png')) + glob.glob(os.path.join(p, '*.jpg')))
+        elif not use_subfolders and by_date_or_name == "DATE":
+            file_fps = sorted(
+                glob.glob(os.path.join(p, '*.png')) + glob.glob(os.path.join(p, '*.jpg')),
+                key=os.path.getmtime)
+        elif use_subfolders and by_date_or_name == "NAME":
+            file_fps = sorted(
+                glob.glob(os.path.join(p, '**/*.png'), recursive=True) +
+                glob.glob(os.path.join(p, '**/*.jpg'), recursive=True))
+        elif use_subfolders and by_date_or_name == "DATE":
+            file_fps = sorted(
+                glob.glob(os.path.join(p, '**/*.png'), recursive=True) +
+                glob.glob(os.path.join(p, '**/*.jpg'), recursive=True),
+                key=os.path.getmtime)
 
         # Ensure the slice doesn't go beyond the end of the file list
+
         if idx_slice_stop + idx > len(file_fps):
             idx_slice_stop = len(file_fps) - idx
 
-        for i in range(idx_slice_start + idx, idx_slice_stop + idx, slice_idx_step):
-            for fn in file_fps[i:i + slice_idx_step]:
-                image = cv2.imread(fn)
-                if image is not None:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # converting to RGB format
-                    image_list.append(image)
+        slice_size = idx_slice_stop - idx_slice_start
+        # for i in range(idx_slice_start + idx, idx_slice_stop + idx):
+        for fn in file_fps[idx_slice_start + idx:idx_slice_start + idx + slice_size]:
+            image = cv2.imread(fn)
+            if image is not None:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # converting to RGB format
+                image_list.append(image)
 
         # Convert list of images to tensor (T,H,W,C)
-        tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
+        if use_float16:
+            tensor = torch.stack([torch.tensor(img, dtype=torch.float16) for img in image_list])
+        else:
+            tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
+        del image_list
         tensor = tensor / 255.0
         return (tensor,)
 
 
-class VideoFileToImageStack(VideoFileToImage, metaclass=WidgetMetaclass):
+class SmoothStackTemporalByDistance(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+                "top_threshold_first_order": ("FLOAT", {"min": 0.0, "max": 100.0, "step": 0.1, "default": 1.0}),
+                "bottom_threshold_first_order": ("FLOAT", {"min": 0.0, "max": 100.0, "step": 0.1, "default": 1.0}),
+                "iterations": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+
+    def handler(self, image_stack,
+                top_threshold_first_order=1.0, bottom_threshold_first_order=1.0, iterations=1):
+        import torch
+        # calculate and print the total size in memory in bytes of the tensor
+        print(
+            f"Size of tensor in memory in GB: {image_stack.element_size() * image_stack.nelement() / (1024 ** 3)} GB, dtype: {image_stack.dtype}")
+        # print the available memory on the GPU in GB
+        print(f"Available memory on GPU in GB: {torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)} GB")
+
+        # image_stack = image_stack.clone()
+        image_stack = image_stack.to(torch.float16)
+
+        for _ in range(iterations):
+            # Compute the first-order differences (gradient) along the time dimension (0)
+            first_order_diff = torch.gradient(image_stack, dim=0)[0]
+
+            # Compute the Euclidean norm of the first-order differences
+            euclidean_diff_first_order = torch.norm(first_order_diff.view(first_order_diff.shape[0], -1), dim=1)
+
+            # Identify the frames with differences greater than the top threshold, excluding the last index
+            outlier_indices_top = torch.where(euclidean_diff_first_order[:-2] > top_threshold_first_order)[0]
+
+            # Interpolate frames where the differences are greater than the top threshold
+            interpolated_frames_top = 0.5 * (image_stack[outlier_indices_top] + image_stack[outlier_indices_top + 2])
+            image_stack[outlier_indices_top + 1] = interpolated_frames_top
+
+            # Identify the frames with differences less than the bottom threshold, excluding the last index
+            outlier_indices_bottom = torch.where(euclidean_diff_first_order[:-2] < bottom_threshold_first_order)[0]
+
+            # Create a mask to delete frames where the differences are less than the bottom threshold
+            mask = torch.ones(image_stack.size(0), dtype=torch.bool)
+            mask[outlier_indices_bottom + 1] = False
+            image_stack = image_stack[mask]
+            # now remove the first and last frames
+            image_stack = image_stack[1:-1]
+            # print the shape and stats for image_stack
+            print(
+                f"image_stack shape: {image_stack.shape}, image_stack stats: {image_stack.min()}, {image_stack.max()}")
+
+        return (image_stack.to(torch.float32),)
+
+
+class GetImageStackStatisticsABC(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+    """Get statistics of an image stack"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+            },
+
+            "optional":
+                {"text":
+                     ("STRING", {"multiline": False}),
+                 }
+        }
+
+    RETURN_TYPES = ("STRING", "IMAGE",)
+
+    def handler(self, image_stack, text):
+        import numpy as np
+        import torch
+        # if the dtype is not float32
+        if image_stack.dtype != torch.float32:
+            image_stack = image_stack.to(torch.float32)
+
+        image_stack = image_stack.permute(0, 3, 1, 2)
+        image_stack_diff = image_stack[1:] - image_stack[:-1]
+        image_stack_diff = torch.sqrt(torch.sum(image_stack_diff ** 2, dim=(1, 2, 3)))
+        image_stack_diff_len = len(image_stack_diff)
+        required_width = 512 + image_stack_diff_len
+
+        mean = torch.mean(image_stack_diff)
+        std = torch.std(image_stack_diff)
+        median = torch.median(image_stack_diff)
+        max = torch.max(image_stack_diff)
+        min = torch.min(image_stack_diff)
+
+        out_str = f"mean: {mean}, std: {std}, median: {median}, max: {max}, min: {min}, len: {image_stack_diff_len}"
+
+        # create the histogram
+        hist_values, _ = np.histogram(image_stack_diff.numpy(), bins=100)
+        hist_values = hist_values / hist_values.max()  # Normalize to [0, 1]
+
+        # Create an image tensor with shape (1, 512, required_width, 3) filled with zeros
+        out_hist_image = torch.zeros((1, 512, required_width, 3))
+
+        # Determine the scaling factors for width and height for the histogram
+        scale_width = 512 // len(hist_values)
+        scale_height = out_hist_image.shape[1]
+
+        # Fill the image tensor with the histogram
+        for i, value in enumerate(hist_values):
+            height = int(value * scale_height)
+            start_x = int(i * scale_width)
+            end_x = int((i + 1) * scale_width)
+            out_hist_image[0, height:, start_x:end_x - 1, :] = 1  # Color as white
+
+        # Create a plot for the difference for each frame pair
+        plot_offset = 512
+        for i, value in enumerate(image_stack_diff):
+            height = int(value * scale_height / max)  # Normalize by the max value
+            start_x = plot_offset + i
+            end_x = plot_offset + i + 1
+            out_hist_image[0, height:, start_x:end_x, :] = 1  # Color as white
+
+        return (out_str, out_hist_image,)
+
+
+class VideoFileToImageStack(ABCABCVideoFileToImage, metaclass=ABCWidgetMetaclass):
     """Use cv2 to open a video and save the videos individual frames"""
 
     def handler(self, video_in, text, idx_slice_start, idx_slice_stop, slice_idx_step, idx):
@@ -232,8 +417,9 @@ class VideoFileToImageStack(VideoFileToImage, metaclass=WidgetMetaclass):
 
         start = (idx * slice_idx_step) + idx_slice_start
         stop = (idx * slice_idx_step) + idx_slice_stop
+        slice_length = stop - start
 
-        for frame_count in range(start, stop, slice_idx_step):
+        for frame_count in range(start, start + slice_length):
             # Seek to frame_count frame
             vidcap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
 
@@ -253,7 +439,7 @@ class VideoFileToImageStack(VideoFileToImage, metaclass=WidgetMetaclass):
         return (tensor,)
 
 
-class ImageStackToVideoFrames(metaclass=WidgetMetaclass):
+class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
     """Really just saves the image stack to a folder"""
 
     @classmethod
@@ -308,90 +494,7 @@ class ImageStackToVideoFrames(metaclass=WidgetMetaclass):
         return ()
 
 
-class ImageStackToVideoFile(metaclass=WidgetMetaclass):
-    """Really just saves the image stack to a video file"""
-
-    @classmethod
-    def INPUT_TYPES(self):
-        return {"required":
-            {
-                "image_stack": ("IMAGE",),
-                "video_out": ("STRING", {"multiline": False, "default": "video01.mp4"}),
-            },
-            "optional":
-                {"fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
-                 "func": ("FUNC", {"default": "NONE"}),
-                 },
-        }
-
-    RETURN_TYPES = ("FUNC", "STRING",)
-    RETURN_NAMES = ("FUNC", "video_out_path",)
-    CATEGORY = "video"
-    OUTPUT_NODE = True
-    FUNCTION = "handler"
-
-    def handler(self, **kwargs):
-        """frames are in the format (T,H,W,C)"""
-        import cv2
-        import os
-        import numpy as np
-        import uuid
-        import shutil
-        import inspect
-
-        func = kwargs.get("func", None)
-
-        if func:
-            kwargs = func(**kwargs)
-
-        self.ARGS = kwargs
-        self.IN_FUNC = func
-        # get this functions source code
-        try:
-            self.CODE = inspect.getsource(ImageStackToVideoFile.handler)
-        except OSError:
-            self.CODE = "Unable to get source code"
-
-        self.FUNC = self.handler
-
-        try:
-            image_stack = kwargs["image_stack"]
-        except KeyError:
-            # this means we are just passing our function through
-            return (self,)
-
-        video_out = kwargs["video_out"]
-        fps = kwargs["fps"]
-        video_out_path = os.path.join(video_dir, video_out)
-
-        # check to see if the video file already exists
-        if os.path.exists(video_out_path):
-            # move the existing file to a random folder inside the video folder
-            random_folder = os.path.join(video_dir, str(uuid.uuid4()))
-            os.makedirs(random_folder)
-            shutil.move(video_out_path, random_folder)
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video = cv2.VideoWriter(video_out_path + ".mp4", fourcc, float(fps),
-                                (image_stack.shape[2], image_stack.shape[1]))
-
-        for i in range(image_stack.shape[0]):
-            image = image_stack[i].numpy()
-
-            # Check that the image is in the correct format
-            if image.dtype != np.uint8:
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                image = (image * 255).astype(np.uint8)  # convert to 0-255 and cast to uint8
-
-            video.write(image)
-
-        video.release()
-        image_stack = None
-        del image_stack
-        return (self, video_out_path + ".mp4",)
-
-
-class TemporalSpatialSmoothing(metaclass=WidgetMetaclass):
+class TemporalSpatialSmoothing(metaclass=ABCWidgetMetaclass):
     """Smooths the image stack in time and space"""
 
     @classmethod
@@ -476,13 +579,7 @@ class TemporalSpatialSmoothing(metaclass=WidgetMetaclass):
         return (image_stack,)
 
 
-import torch
-from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
-from torchvision.utils import flow_to_image
-from torchvision.transforms.functional import resize
-
-
-class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
+class TemporalOpticalFlowSmoothing(metaclass=ABCWidgetMetaclass):
     """Smooths the image stack in time using RAFT for optical flow estimation"""
 
     @classmethod
@@ -626,12 +723,7 @@ class TemporalOpticalFlowSmoothing(metaclass=WidgetMetaclass):
         return (stack,)
 
 
-# TW: Inherit for code reuse, consistency
-import torch
-from torchvision.utils import draw_keypoints
-
-
-class MovingCircle(metaclass=WidgetMetaclass):
+class MovingCircle(metaclass=ABCWidgetMetaclass):
     # VideoWidget class definition
 
     def calculate_start(self, x1, y1, width, height):
@@ -661,8 +753,8 @@ class MovingCircle(metaclass=WidgetMetaclass):
         img = draw_keypoints(img, keypoints, colors=color, radius=radius)
 
         # convert to (w,h,c)
-        #img = img.permute(1, 2, 0).unsqueeze(0)
-        img=img.unsqueeze(0)
+        # img = img.permute(1, 2, 0).unsqueeze(0)
+        img = img.unsqueeze(0)
 
         # Calculate new size
         if aspect_ratio < 1:
@@ -733,7 +825,7 @@ class MovingCircle(metaclass=WidgetMetaclass):
         end = torch.tensor(self.calculate_end(x2, y2, width, height))
 
         # color is supposed to be a tuple
-        color = tuple(map(lambda x:int(x), color.split()))
+        color = tuple(map(lambda x: int(x), color.split()))
         # Initialize for compositing
 
         frames = []
@@ -753,3 +845,443 @@ class MovingCircle(metaclass=WidgetMetaclass):
         import doctest
 
         doctest.testmod()
+
+
+class FindFrameFolders(metaclass=ABCWidgetMetaclass):
+    """Finds all folders directly off a given root path containing sequential image files"""
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "root_path": ("STRING", {"default": "path to root of project"})
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    RETURN_NAMES = ("image_sequence_folders",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    def handler(self, **kwargs):
+        root_path = kwargs["root_path"]
+        image_sequence_folders = []
+
+        for folder_name in os.listdir(root_path):
+            folder_path = os.path.join(root_path, folder_name)
+            if os.path.isdir(folder_path):
+                image_files = [file for file in os.listdir(folder_path) if file.endswith(('.png', '.jpg', '.jpeg'))]
+                if len(image_files) >= 2:
+                    image_sequence_folders.append(folder_path)
+
+        return (image_sequence_folders,)
+
+
+class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
+    """Combines lists of audio files and video files using imageio-ffmpeg"""
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "audio_files": ("LIST", {"default": []}),
+                "video_files": ("LIST", {"default": []}),
+                "fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
+            },
+            "optional": {
+                "move_to_folder": ("STRING", {"default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    RETURN_NAMES = ("combined_video_paths",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    def handler(self, **kwargs):
+        from os.path import splitext, join
+        import shutil
+        audio_files = kwargs["audio_files"]
+        video_files = kwargs["video_files"]
+        move_to_folder = kwargs.get("move_to_folder", "")
+
+        combined_video_paths = []
+        video_audio_pairs = zip(video_files, audio_files)
+
+        ffmpeg_exe = ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_exe is None:
+            raise RuntimeError("FFmpeg could not be found.")
+
+        for video_file, audio_file in video_audio_pairs:
+            video_out_file_fp = splitext(video_file)[0] + "_v_and_a.mp4"
+            input_args = ['-i', video_file, '-i', audio_file]
+            output_args = ['-c:v', 'copy', '-c:a', 'aac', '-strict', 'experimental', '-y', video_out_file_fp]
+            command = [ffmpeg_exe] + input_args + output_args
+            os.system(' '.join(command))
+
+            if move_to_folder:
+                destination_path = join(move_to_folder, os.path.basename(video_out_file_fp))
+                shutil.move(video_out_file_fp, destination_path)
+                combined_video_paths.append(destination_path)
+            else:
+                combined_video_paths.append(video_out_file_fp)
+
+        return (combined_video_paths,)
+
+
+class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
+    """Combines lists of folders containing frames of individual video files using imageio and ffmpeg to create video files"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "folders_with_frames": ("LIST", {"default": []}),
+                "fps/length": ("FLOAT", {"default": 30, "min": 1, "max": 10000000000}),
+                "bitrate": ("STRING", {"default": "20000k"}),
+                "codec": (
+                    ["libx264", "libx265", "mpeg4", "vp9", "huffyuv", "flv1"],
+                    {"default": "libx264"}
+                ),
+                "file_extension": (
+                    [".mp4", ".mov", ".avi", ".flv", ".mkv", ".webm"],
+                    {"default": ".mp4"}
+                ),
+                "fps or length": (["fps", "length"], {"default": "fps"}),
+            }
+        }
+
+    RETURN_TYPES = ("LIST", "STRING",)
+    RETURN_NAMES = ("combined_video_paths",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    def handler(self, **kwargs):
+        import imageio
+        import os
+
+        folders_with_frames = kwargs["folders_with_frames"]
+        fps_length_value = kwargs["fps/length"]
+        bitrate = kwargs["bitrate"]
+        codec = kwargs["codec"]
+        file_extension = kwargs["file_extension"]
+        fps_or_length = kwargs["fps or length"]
+
+        combined_video_paths = []
+        messages = []
+
+        for folder_path in folders_with_frames:
+            try:
+                out_file = os.path.join(os.path.dirname(folder_path),
+                                        f"{os.path.basename(folder_path)}{file_extension}")
+                frame_files = sorted(
+                    [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+
+                if not frame_files:
+                    messages.append(f"No frame files found in folder: {folder_path}")
+                    continue
+
+                if fps_or_length == "fps":
+                    fps = fps_length_value
+                else:
+                    total_frames = len(frame_files)
+                    fps = total_frames / fps_length_value if fps_length_value != 0 else 30
+
+                writer = imageio.get_writer(out_file, fps=fps, codec=codec, bitrate=bitrate)
+
+                for frame_file in frame_files:
+                    frame_path = os.path.join(folder_path, frame_file)
+                    frame = imageio.imread(frame_path)
+                    writer.append_data(frame)
+
+                writer.close()
+                combined_video_paths.append(out_file)
+            except Exception as e:
+                messages.append(f"Error processing folder {folder_path}: {str(e)}")
+
+        return (combined_video_paths, "\n".join(messages),)
+
+
+class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
+    """Really just saves the image stack to a video file"""
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+                "video_out": ("STRING", {"multiline": False, "default": "video01.mp4"}),
+            },
+            "optional":
+                {"fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
+                 "func": ("FUNC", {"default": "NONE"}),
+                 "audio_file": ("STRING", {"default": "NONE"}),
+                 },
+        }
+
+    RETURN_TYPES = ("FUNC", "STRING",)
+    RETURN_NAMES = ("FUNC", "video_out_path",)
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    def handler(self, **kwargs):
+        """frames are in the format (T,H,W,C)"""
+        import cv2
+        import os
+        import numpy as np
+        import uuid
+        import shutil
+        import inspect
+
+        func = kwargs.get("func", None)
+        audio_file = kwargs.get("audio_file", None)
+        if func:
+            kwargs = func(**kwargs)
+
+        self.ARGS = kwargs
+        self.IN_FUNC = func
+        # get this functions source code
+        try:
+            self.CODE = inspect.getsource(ImageStackToVideoFile.handler)
+        except OSError:
+            self.CODE = "Unable to get source code"
+
+        self.FUNC = self.handler
+
+        try:
+            image_stack = kwargs["image_stack"]
+        except KeyError:
+            # this means we are just passing our function through
+            return (self,)
+
+        video_out = kwargs["video_out"]
+        fps = kwargs["fps"]
+        fps = np.array([fps], dtype=np.float16)[0]
+        video_out_path = os.path.join(video_dir, video_out)
+
+        # check to see if the video file already exists
+        if os.path.exists(video_out_path):
+            # move the existing file to a random folder inside the video folder
+            random_folder = os.path.join(video_dir, str(uuid.uuid4()))
+            os.makedirs(random_folder)
+            shutil.move(video_out_path, random_folder)
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video = cv2.VideoWriter(video_out_path + ".mp4", fourcc, fps,
+                                (image_stack.shape[2], image_stack.shape[1]))
+
+        for i in range(image_stack.shape[0]):
+            image = image_stack[i].numpy()
+
+            # Check that the image is in the correct format
+            if "float16" in str(image.dtype):
+                image = image.astype(np.float32)
+
+            if image.dtype != np.uint8:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                image = (image * 255).astype(np.uint8)  # convert to 0-255 and cast to uint8
+
+            video.write(image)
+
+        if audio_file and os.path.exists(audio_file):
+            video_with_audio_path = video_out_path + "_with_audio.mp4"
+            cmd = f"ffmpeg -i {video_out_path}.mp4 -i {audio_file} -filter_complex \
+                '[0:a]apad=pad_dur={video_duration}[a];[a][1:a]amerge=inputs=2[aout]' \
+                -map [aout] -c:v copy -c:a aac {video_with_audio_path}"
+            os.system(cmd)
+            return (self, video_with_audio_path)
+        video.release()
+        image_stack = None
+        del image_stack
+        return (self, video_out_path + ".mp4",)
+
+
+class CreateConsistentVideo(metaclass=ABCWidgetMetaclass):
+    """Creates a single video from a folder of videos with a consistent rate of change"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_folder": ("STRING", {"default": ""}),
+                "rate_of_change_target": ("FLOAT", {"default": 0.5}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "LIST", "STRING",)
+    RETURN_NAMES = ("joined_video_path", "individual_video_paths", "error_messages")
+    CATEGORY = "video"
+    OUTPUT_NODE = True
+    FUNCTION = "handler"
+
+    def handler(self, **kwargs):
+        import asyncio
+        import os
+
+        video_folder = kwargs["video_folder"]
+        rate_of_change_target = kwargs["rate_of_change_target"]
+
+        individual_video_paths = []
+        error_messages = []
+
+        async def process_video(file_path):
+            try:
+                # Calculate visual differences
+                difference = calculate_visual_difference(file_path)
+
+                # Adjust frame rate based on the rate of change target
+                adjusted_video_path = adjust_frame_rate(
+                    video_path=file_path,
+                    target_rate_of_change=rate_of_change_target,
+                    visual_difference=difference
+
+                )
+
+                return adjusted_video_path
+
+            except Exception as e:
+                error_messages.append(str(e))
+                return None
+
+        # Gather video files
+
+        video_files = [f for f in os.listdir(video_folder) if
+                       f.lower().endswith(('.mp4', '.mov', '.avi', '.flv', '.mkv', '.webm'))]
+        # now get their full path
+        video_files = [os.path.join(video_folder, f) for f in video_files]
+
+        # Use Asyncio to process videos in parallel
+        # There is no current loop so we need to create a NEW one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        processed_videos = loop.run_until_complete(asyncio.gather(
+            *[process_video(file_path) for file_path in video_files]
+        ))
+
+        # Combine processed videos into the final video
+        joined_video_path = combine_videos(processed_videos, video_folder, video_folder)
+
+        return (joined_video_path, individual_video_paths, "\n".join(error_messages),)
+
+
+def calculate_visual_difference(video_path):
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise Exception("Could not open the video file")
+
+    # Initialize variables to hold previous frame
+    prev_frame_tensor = None
+    total_difference = 0
+
+    # Iterate through frames
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Convert frame to a PyTorch tensor and normalize
+        frame_tensor = torch.from_numpy(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).permute(2, 0, 1).float() / 255
+
+        # If previous frame exists, calculate the difference using SSIM
+        if prev_frame_tensor is not None:
+            difference = get_img_diff_torch(prev_frame_tensor, frame_tensor)
+            total_difference += difference
+
+        # Update previous frame
+        prev_frame_tensor = frame_tensor
+
+    # Close the video file
+    cap.release()
+
+    return total_difference
+
+
+def get_img_diff_torch(image1: torch.Tensor, image2: torch.Tensor, K1=0.01, K2=0.03, L=255):
+    # Convert images to grayscale using weighted average of color channels
+    gray1 = 0.2989 * image1[0] + 0.5870 * image1[1] + 0.1140 * image1[2]
+    gray2 = 0.2989 * image2[0] + 0.5870 * image2[1] + 0.1140 * image2[2]
+
+    # Calculate mean and variance of input images
+    mu1 = torch.mean(gray1)
+    mu2 = torch.mean(gray2)
+    var1 = torch.var(gray1)
+    var2 = torch.var(gray2)
+    covar = np.cov(gray1.cpu().numpy().ravel(), gray2.cpu().numpy().ravel())[0][1]
+
+    # Set constants
+    C1 = (K1 * L) ** 2
+    C2 = (K2 * L) ** 2
+
+    # Calculate SSIM
+    numerator = (2 * mu1 * mu2 + C1) * (2 * covar + C2)
+    denominator = (mu1 ** 2 + mu2 ** 2 + C1) * (var1 + var2 + C2)
+    ssim = numerator / denominator
+
+    # Return difference score
+    return 1 - ssim
+
+
+def adjust_frame_rate(video_path, target_rate_of_change, visual_difference):
+    filename, _ = os.path.splitext(os.path.basename(video_path))
+    base_dir = os.path.dirname(video_path)
+    output_filename = f"{filename}_adjusted.mp4"
+    output_filename = os.path.join(base_dir, output_filename)
+
+    #  use the full path
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise Exception("Could not open the video file")
+
+    original_fps = int(cap.get(cv2.CAP_PROP_FPS))
+    frame_size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+    if visual_difference == 0:
+        desired_fps = float(original_fps)
+    else:
+        desired_fps = max(float(original_fps * target_rate_of_change / visual_difference), 1.0)
+
+    desired_fps = int(desired_fps * 8) / 8
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+    out = cv2.VideoWriter(output_filename, fourcc, desired_fps, frame_size)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        out.write(frame)
+
+    cap.release()
+    out.release()
+
+    return output_filename
+
+
+def combine_videos(video_paths, base_input_directory, output_path):
+    import subprocess
+    import tempfile
+
+    # Create a temporary text file
+    with tempfile.NamedTemporaryFile(mode="w+t", delete=False) as temp_file:
+        for video_path in video_paths:
+            temp_file.write(f"file '{video_path}'\n")
+
+    # TODO: Check cross-platform compatibility (linux)
+    cmd = f"ffmpeg -f concat -safe 0 -i \"{temp_file.name}\" \"{output_path}combined{os.path.splitext(video_paths[0])[1]}\""
+
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+        return output_path
+    except subprocess.CalledProcessError as e:
+        return str(e)
+    finally:
+        # Clean up the temporary file
+        temp_file.close()
+        os.remove(temp_file.name)
