@@ -71,3 +71,54 @@ class AudioFileListFromPathPattern:
             l_metadata.append(GetAudioMetaData().get_audio_metadata(path=fpath)[0])
 
         return (l_fpaths, l_bytes, l_metadata,)
+
+
+import librosa
+import soundfile as sf
+import numpy as np
+
+@ETK_audio_base
+class JoinAudioFiles:
+    """ Joins a list of audio files into a single audio file """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "paths": ("LIST", {"default": []}),
+                "output_path": ("STRING", {"multiline": False, "default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "BYTES", "DICT",)
+    FUNCTION = 'join_audio_files'
+    CATEGORY = 'ETK/audio'
+
+    def join_audio_files(self, **kwargs):
+        kwargs = copy.deepcopy(kwargs)
+        paths = kwargs['paths']
+        output_path = kwargs['output_path']
+
+        # Read the first file to get metadata
+        audio_data_list = []
+        for path in paths:
+            audio_data, sr = librosa.load(path, sr=None)
+            audio_data_list.append(audio_data)
+
+        # Concatenate all audio data
+        joined_audio_data = np.concatenate(audio_data_list)
+
+        # Save the concatenated audio
+        sf.write(output_path, joined_audio_data, sr)
+
+        # Get metadata
+        metadata = {
+            'duration': librosa.get_duration(y=joined_audio_data, sr=sr),
+            'samplerate': sr
+        }
+
+        # Get bytes
+        with open(output_path, "rb") as f:
+            file_bytes = f.read()
+
+        return (output_path, file_bytes, metadata,)
