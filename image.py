@@ -236,6 +236,7 @@ class TinyTxtToImg:
         self.seed = kwargs.get("seed", random.randint(0, 2 ** 32 - 1))
         self.one_seed_per_batch = kwargs.get("one_seed", False)
         self.denoise = kwargs.get("denoise", 1.0)
+        self.steps = kwargs.get("steps", 10)
 
         if not hasattr(TinyTxtToImg, "share_mdl"):
             TinyTxtToImg.share_mdl = None
@@ -273,7 +274,7 @@ class TinyTxtToImg:
                                                 TinyTxtToImg.share_vae
                                                 )
 
-        self.steps = 10
+
         self.cfg = 8
         self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
         self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
@@ -320,8 +321,8 @@ class TinyTxtToImg:
                     print(e)
                     raise ValueError("advanced clip encoder failed")
 
-        if not self.latent_image:
-            self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
+        #if not self.latent_image == None:
+            #self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
         self.KSampler = KSampler()
         self.samples = self.KSampler.sample(
@@ -1277,11 +1278,36 @@ class StackImages:
     CATEGORY = "ETK/image"
 
     def stackme(self, image1, image2=None, number_of_images=2, mode="all"):
+        # import modules to help clear memory
+        import gc
+        import torch
+        import torch.cuda
+
+
+
         """
         stacks two images on top of each other
         images are (B, W, H, C) torch tensors
         """
-        image1 = image1.clone()
+        if image1 is not None:
+            image1 = image1.clone()
+
+        if image2 is not None:
+            image2 = image2.clone()
+
+        #gc.collect()
+        #torch.cuda.empty_cache()
+
+        del gc.garbage[:]
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+
+
+
+
+
 
         if image2 is not None:
             image2 = image2.clone()
