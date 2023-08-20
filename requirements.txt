@@ -4,3 +4,4 @@ google-auth-httplib2
 oauth2client
 httplib2
 GitPython
+librosa
