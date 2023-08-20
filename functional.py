@@ -390,9 +390,10 @@ class FuncListToStr:
     FUNCTION = "func"
 
     def func(self, **kwargs):
-        text = kwargs.get("list", None)
+        lst = kwargs.get("list", None)
         code = kwargs.get("code", None)
-        x = text
+        x = lst
+        x_list = lst
         my_globals = globals()
         my_locals = locals()
 
