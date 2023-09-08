@@ -23,6 +23,8 @@ from skimage.metrics import structural_similarity as ssim
 import cv2
 import numpy as np
 import cv2
+import subprocess
+import imageio_ffmpeg as ffmpeg
 
 NODE_CLASS_MAPPINGS = {}  # this is the dictionary that will be used to register the nodes
 
@@ -51,6 +53,17 @@ def video_files(s):
     ret = sorted([name for name in os.listdir(s.input_dir) if
                   os.path.isfile(os.path.join(s.input_dir, name)) and name.endswith('.mp4')])
     return ret
+
+
+def run_ffmpeg_command(args):
+    """
+    Executes a command using the ffmpeg executable.
+
+    Parameters:
+        args (list): List of command-line arguments for ffmpeg.
+    """
+    cmd = [ffmpeg.get_ffmpeg_exe()] + args
+    subprocess.run(cmd)
 
 
 # start with an ABC to define the common widget interface
@@ -276,22 +289,108 @@ class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
         return (tensor,)
 
 
-class SmoothStackTemporalByDistance(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+class SmoothStackTemporalByDistance2(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
             {
                 "image_stack": ("IMAGE",),
-                "top_threshold_first_order": ("FLOAT", {"min": 0.0, "max": 100.0, "step": 0.1, "default": 1.0}),
-                "bottom_threshold_first_order": ("FLOAT", {"min": 0.0, "max": 100.0, "step": 0.1, "default": 1.0}),
+                "top_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
+                "bottom_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
+                "max_iterations": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
+                "target_deviation": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 0.0}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+
+    def handler(self, image_stack, top_thresh_normed=0.9, bottom_thresh_normed=0.10, max_iterations=1,
+                target_deviation=0.0):
+        import torch
+        # Code for printing memory size and available GPU memory stays the same
+
+        image_stack = image_stack.to(torch.float16)
+        info = ""
+        iteration = 0
+        while True:
+            # Compute the first-order differences (gradient) along the time dimension (0)
+            first_order_diff = torch.gradient(image_stack, dim=0)[0]
+
+            # Compute the Euclidean norm of the first-order differences
+            euclidean_diff_first_order = torch.norm(first_order_diff.view(first_order_diff.shape[0], -1), dim=1).clone()
+
+            euclidean_diff_first_order_range = euclidean_diff_first_order.max() - euclidean_diff_first_order.min()
+            euclidean_diff_first_order_normed = (euclidean_diff_first_order - euclidean_diff_first_order.min()) / \
+                                                euclidean_diff_first_order_range
+
+            euclidean_diff_first_order_normed = euclidean_diff_first_order_normed[:-1]
+
+            start_mean = euclidean_diff_first_order.mean()
+
+            start_std = euclidean_diff_first_order.std()
+
+            if start_std <= target_deviation or iteration >= max_iterations:
+                break
+
+            # Identify the frames with differences greater than the top threshold, excluding the last index
+            outlier_indices_top = torch.where(euclidean_diff_first_order_normed > top_thresh_normed)[0]
+
+            # Interpolate frames where the differences are greater than the top threshold
+            interpolated_frames_top = 0.5 * (image_stack[outlier_indices_top] + image_stack[outlier_indices_top + 1])
+            image_stack[outlier_indices_top + 1] = interpolated_frames_top
+
+            # Identify the frames with differences less than the bottom threshold, excluding the last index
+            outlier_indices_bottom = torch.where(euclidean_diff_first_order_normed < bottom_thresh_normed)[0]
+
+            # Create a mask to delete frames where the differences are less than the bottom threshold
+            mask = torch.ones(image_stack.size(0), dtype=torch.bool)
+            mask[outlier_indices_bottom + 1] = False
+            image_stack = image_stack[mask]
+            # now remove the first and last frames
+            # image_stack = image_stack[1:-1]
+            # print the shape and stats for image_stack
+
+            # relate how many frames where changed via top threshold and bottom threshold
+            # also report on the mean and std of the euclidean_diff_first_order
+
+            info += f"Number of frames changed via top threshold: {len(outlier_indices_top)}\n " \
+                    f"Number of frames changed via bottom threshold: {len(outlier_indices_bottom)}\n " \
+                    f"Mean of euclidean_diff_first_order: {start_mean}\n " \
+                    f"Std of euclidean_diff_first_order: {start_std}\n " \
+                    f"\n\n"
+            print(info)
+            iteration += 1
+
+            if image_stack.shape[0] == 0:
+                print("image_stack is empty, returning None")
+                return (None, None,)
+            print(
+                f"image_stack shape: {image_stack.shape}, image_stack stats: {image_stack.min()}, {image_stack.max()}")
+
+        return (image_stack.to(torch.float32), info,)
+
+
+class SmoothStackTemporalByDistance(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+    """
+    Smooth the temporal dimension of the image stack by calculating the distance between each frame
+    and the next frame and then averaging the frames that are within a certain distance of each other.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+            {
+                "image_stack": ("IMAGE",),
+                "top_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
+                "bottom_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
                 "iterations": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
             }
         }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "STRING")
 
     def handler(self, image_stack,
-                top_threshold_first_order=1.0, bottom_threshold_first_order=1.0, iterations=1):
+                top_thresh_normed=0.9, bottom_thresh_normed=0.10, iterations=1):
         import torch
         # calculate and print the total size in memory in bytes of the tensor
         print(
@@ -301,38 +400,60 @@ class SmoothStackTemporalByDistance(ABCABCVideoFolderToImage, metaclass=ABCWidge
 
         # image_stack = image_stack.clone()
         image_stack = image_stack.to(torch.float16)
-
+        info = ""
         for _ in range(iterations):
             # Compute the first-order differences (gradient) along the time dimension (0)
             first_order_diff = torch.gradient(image_stack, dim=0)[0]
 
             # Compute the Euclidean norm of the first-order differences
-            euclidean_diff_first_order = torch.norm(first_order_diff.view(first_order_diff.shape[0], -1), dim=1)
+            euclidean_diff_first_order = torch.norm(first_order_diff.view(first_order_diff.shape[0], -1), dim=1).clone()
+
+            euclidean_diff_first_order_range = euclidean_diff_first_order.max() - euclidean_diff_first_order.min()
+            euclidean_diff_first_order_normed = (euclidean_diff_first_order - euclidean_diff_first_order.min()) / \
+                                                euclidean_diff_first_order_range
+
+            euclidean_diff_first_order_normed = euclidean_diff_first_order_normed[:-1]
+
+            start_mean = euclidean_diff_first_order.mean()
+            start_std = euclidean_diff_first_order.std()
 
             # Identify the frames with differences greater than the top threshold, excluding the last index
-            outlier_indices_top = torch.where(euclidean_diff_first_order[:-2] > top_threshold_first_order)[0]
+            outlier_indices_top = torch.where(euclidean_diff_first_order_normed > top_thresh_normed)[0]
 
             # Interpolate frames where the differences are greater than the top threshold
-            interpolated_frames_top = 0.5 * (image_stack[outlier_indices_top] + image_stack[outlier_indices_top + 2])
+            interpolated_frames_top = 0.5 * (image_stack[outlier_indices_top] + image_stack[outlier_indices_top + 1])
             image_stack[outlier_indices_top + 1] = interpolated_frames_top
 
             # Identify the frames with differences less than the bottom threshold, excluding the last index
-            outlier_indices_bottom = torch.where(euclidean_diff_first_order[:-2] < bottom_threshold_first_order)[0]
+            outlier_indices_bottom = torch.where(euclidean_diff_first_order_normed < bottom_thresh_normed)[0]
 
             # Create a mask to delete frames where the differences are less than the bottom threshold
             mask = torch.ones(image_stack.size(0), dtype=torch.bool)
             mask[outlier_indices_bottom + 1] = False
             image_stack = image_stack[mask]
             # now remove the first and last frames
-            image_stack = image_stack[1:-1]
+            # image_stack = image_stack[1:-1]
             # print the shape and stats for image_stack
+
+            # relate how many frames where changed via top threshold and bottom threshold
+            # also report on the mean and std of the euclidean_diff_first_order
+            info += f"Number of frames changed via top threshold: {len(outlier_indices_top)}\n " \
+                    f"Number of frames changed via bottom threshold: {len(outlier_indices_bottom)}\n " \
+                    f"Mean of euclidean_diff_first_order: {start_mean}\n " \
+                    f"Std of euclidean_diff_first_order: {start_std}\n " \
+                    f"\n\n"
+            print(info)
+
+            if image_stack.shape[0] == 0:
+                print("image_stack is empty, returning None")
+                return (None, None,)
             print(
                 f"image_stack shape: {image_stack.shape}, image_stack stats: {image_stack.min()}, {image_stack.max()}")
 
-        return (image_stack.to(torch.float32),)
+        return (image_stack.to(torch.float32), info,)
 
 
-class GetImageStackStatisticsABC(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+class GetImageStackStatistics(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
     """Get statistics of an image stack"""
 
     @classmethod
@@ -340,43 +461,54 @@ class GetImageStackStatisticsABC(ABCABCVideoFolderToImage, metaclass=ABCWidgetMe
         return {"required":
             {
                 "image_stack": ("IMAGE",),
+                "method": (["SSIM", "MSE"], {"default": "SSIM"}),
             },
 
-            "optional":
-                {"text":
-                     ("STRING", {"multiline": False}),
-                 }
         }
 
     RETURN_TYPES = ("STRING", "IMAGE",)
 
-    def handler(self, image_stack, text):
+    def handler(self, image_stack, method):
         import numpy as np
         import torch
         # if the dtype is not float32
         if image_stack.dtype != torch.float32:
             image_stack = image_stack.to(torch.float32)
 
-        image_stack = image_stack.permute(0, 3, 1, 2)
-        image_stack_diff = image_stack[1:] - image_stack[:-1]
-        image_stack_diff = torch.sqrt(torch.sum(image_stack_diff ** 2, dim=(1, 2, 3)))
-        image_stack_diff_len = len(image_stack_diff)
-        required_width = 512 + image_stack_diff_len
+        image_stack_BCWH = image_stack.permute(0, 3, 1, 2)
+        image_stack_BCWH_DIFF = image_stack_BCWH[1:] - image_stack_BCWH[:-1]
 
-        mean = torch.mean(image_stack_diff)
-        std = torch.std(image_stack_diff)
-        median = torch.median(image_stack_diff)
-        max = torch.max(image_stack_diff)
-        min = torch.min(image_stack_diff)
+        # we want to calculate the mean squared error
+        # of the image stack
+        # so we need to calculate the difference between each image in the stack and the previous image
+        # we have that in image_stack_BCWH_DIFF
+        # now we need to calculate the mean squared error of each image in the stack
+        # which will give us a tensor of shape (B)
+        # where B is the number of images in the stack
 
-        out_str = f"mean: {mean}, std: {std}, median: {median}, max: {max}, min: {min}, len: {image_stack_diff_len}"
+        if method == "MSE":
+            stack_mse_B = torch.mean(image_stack_BCWH_DIFF ** 2, dim=(1, 2, 3))
+        else:
+            # not implimented
+            raise NotImplementedError
+
+        image_stack_diff_len = len(stack_mse_B)
+        required_image_info_width = 512 + image_stack_diff_len
+
+        mean = torch.mean(stack_mse_B)
+        std = torch.std(stack_mse_B)
+        median = torch.median(stack_mse_B)
+        max = torch.max(stack_mse_B)
+        min = torch.min(stack_mse_B)
+
+        out_str = f"mean: {mean}\n std: {std}\n median: {median}\n max: {max}\n min: {min}\n len: {image_stack_diff_len}"
 
         # create the histogram
-        hist_values, _ = np.histogram(image_stack_diff.numpy(), bins=100)
+        hist_values, _ = np.histogram(stack_mse_B.numpy(), bins=100)
         hist_values = hist_values / hist_values.max()  # Normalize to [0, 1]
 
         # Create an image tensor with shape (1, 512, required_width, 3) filled with zeros
-        out_hist_image = torch.zeros((1, 512, required_width, 3))
+        out_hist_image = torch.zeros((1, 512, required_image_info_width, 3))
 
         # Determine the scaling factors for width and height for the histogram
         scale_width = 512 // len(hist_values)
@@ -391,7 +523,7 @@ class GetImageStackStatisticsABC(ABCABCVideoFolderToImage, metaclass=ABCWidgetMe
 
         # Create a plot for the difference for each frame pair
         plot_offset = 512
-        for i, value in enumerate(image_stack_diff):
+        for i, value in enumerate(stack_mse_B):
             height = int(value * scale_height / max)  # Normalize by the max value
             start_x = plot_offset + i
             end_x = plot_offset + i + 1
@@ -457,6 +589,10 @@ class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
     FUNCTION = "handler"
 
     def handler(self, **kwargs):
+        import tempfile
+        import uuid
+        import shutil
+
         image_stack = kwargs["image_stack"]
         folder_out = kwargs["folder_out"]
         folder_out_path = video_dir
@@ -467,9 +603,8 @@ class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
         # Create the output folder if it doesn't exist
         if not os.path.exists(folder_out_path):
             os.makedirs(folder_out_path)
+
         # move any current files in the output folder to a random folder inside the video folder
-        import uuid
-        import shutil
         random_folder = os.path.join(folder_out_path, str(uuid.uuid4()))
         os.makedirs(random_folder)
         for file in os.listdir(folder_out_path):
@@ -1014,12 +1149,18 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
             {
                 "image_stack": ("IMAGE",),
                 "video_out": ("STRING", {"multiline": False, "default": "video01.mp4"}),
+                "fps or length": (["fps", "length"], {"default": "fps"}),
+                "fps/length": ("FLOAT", {"default": 30, "min": 1, "max": 10000000000}),
+                "bitrate": ("STRING", {"default": "20000k"}),
+                "codec": (
+                    ["libx264", "libx265", "mpeg4", "libvpx-vp9", "huffyuv", "flv1"],
+                    {"default": "libx264"}
+                ),
             },
             "optional":
-                {"fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
-                 "func": ("FUNC", {"default": "NONE"}),
-                 "audio_file": ("STRING", {"default": "NONE"}),
-                 },
+                {
+                    "audio_file": ("STRING", {"default": "NONE"}),
+                },
         }
 
     RETURN_TYPES = ("FUNC", "STRING",)
@@ -1029,75 +1170,106 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
     FUNCTION = "handler"
 
     def handler(self, **kwargs):
-        """frames are in the format (T,H,W,C)"""
-        import cv2
         import os
         import numpy as np
         import uuid
         import shutil
-        import inspect
+        import imageio
+        import audioread
+        import cv2
 
-        func = kwargs.get("func", None)
-        audio_file = kwargs.get("audio_file", None)
-        if func:
-            kwargs = func(**kwargs)
+        # video_dir = kwargs["video_dir"]
 
-        self.ARGS = kwargs
-        self.IN_FUNC = func
-        # get this functions source code
-        try:
-            self.CODE = inspect.getsource(ImageStackToVideoFile.handler)
-        except OSError:
-            self.CODE = "Unable to get source code"
+        audio_file = kwargs.get("audio_file")
+        if audio_file == "NONE":
+            audio_file = None
 
-        self.FUNC = self.handler
+        image_stack = kwargs["image_stack"]
 
-        try:
-            image_stack = kwargs["image_stack"]
-        except KeyError:
-            # this means we are just passing our function through
-            return (self,)
-
+        fps_or_length = kwargs["fps or length"]
+        fps_length_value = kwargs["fps/length"]
+        bitrate = kwargs["bitrate"]
+        codec = kwargs["codec"]
         video_out = kwargs["video_out"]
-        fps = kwargs["fps"]
-        fps = np.array([fps], dtype=np.float16)[0]
-        video_out_path = os.path.join(video_dir, video_out)
 
-        # check to see if the video file already exists
+        if fps_or_length == "fps":
+            fps_length_value = np.array([fps_length_value], dtype=np.float16)[0]
+
+        video_out_path = video_out
+
         if os.path.exists(video_out_path):
-            # move the existing file to a random folder inside the video folder
-            random_folder = os.path.join(video_dir, str(uuid.uuid4()))
+            random_folder = os.path.join(os.path.dirname(video_out_path), str(uuid.uuid4()))
             os.makedirs(random_folder)
             shutil.move(video_out_path, random_folder)
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video = cv2.VideoWriter(video_out_path + ".mp4", fourcc, fps,
-                                (image_stack.shape[2], image_stack.shape[1]))
+        if audio_file is not None:
+            audio_file = audio_file
+            if not os.path.exists(audio_file):
+                # raise Exception(f"Audio file {audio_file} does not exist")
+                audio_length = 0
+            else:
+                with audioread.audio_open(audio_file) as audio_info:
+                    audio_length = audio_info.duration
 
-        for i in range(image_stack.shape[0]):
-            image = image_stack[i].numpy()
+        frames_length = image_stack.shape[0]
+        if fps_or_length == "fps":
+            video_length = frames_length / fps_length_value
+        else:
+            video_length = fps_length_value
 
-            # Check that the image is in the correct format
-            if "float16" in str(image.dtype):
-                image = image.astype(np.float32)
+        if fps_or_length == "fps":
+            video_fps = fps_length_value
+        else:
+            video_fps = frames_length / fps_length_value
 
-            if image.dtype != np.uint8:
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                image = (image * 255).astype(np.uint8)  # convert to 0-255 and cast to uint8
+        folder_out = "temp_frames_folder"
 
-            video.write(image)
+        # Now, read the frames from disk as numpy data
+        import tempfile
+        # use tempfile to create a temporary folder
+        with tempfile.TemporaryDirectory() as temp_dir:
+            frames_out_path = temp_dir
 
-        if audio_file and os.path.exists(audio_file):
-            video_with_audio_path = video_out_path + "_with_audio.mp4"
-            cmd = f"ffmpeg -i {video_out_path}.mp4 -i {audio_file} -filter_complex \
-                '[0:a]apad=pad_dur={video_duration}[a];[a][1:a]amerge=inputs=2[aout]' \
-                -map [aout] -c:v copy -c:a aac {video_with_audio_path}"
-            os.system(cmd)
-            return (self, video_with_audio_path)
-        video.release()
-        image_stack = None
-        del image_stack
-        return (self, video_out_path + ".mp4",)
+            # Convert the image stack to frames on disk
+            frame_folder_handler = ImageStackToVideoFramesFolder()
+            frame_folder_handler.handler(image_stack=image_stack, folder_out=frames_out_path)
+
+            frames = []
+            for fl in sorted(os.listdir(frames_out_path)):
+                # if the fl is an actual image file
+                if not fl.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    continue
+                # create the numpy array
+                frame = cv2.imread(os.path.join(frames_out_path, fl))
+                # convert to RGB
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # append to the list of frames
+                frames.append(frame)
+
+        writer = imageio.get_writer(video_out_path, fps=video_fps)
+        for frame in frames:
+            writer.append_data(frame)
+        writer.close()
+
+        if audio_file is not None:
+            if audio_length > video_length:
+                while video_length < audio_length:
+                    image_stack = np.concatenate((image_stack, image_stack[-1:]), axis=0)
+                    video_length += 1 / video_fps
+                    frames_length += 1
+
+            args = [
+                "-i", video_out_path,
+                "-i", audio_file,
+                "-c:v", codec,
+                "-b:v", str(bitrate),
+                "-c:a", "aac",
+                "-strict", "experimental",
+                video_out_path
+            ]
+            run_ffmpeg_command(args)
+
+        return (self, video_out_path,)
 
 
 class CreateConsistentVideo(metaclass=ABCWidgetMetaclass):
@@ -1285,3 +1457,45 @@ def combine_videos(video_paths, base_input_directory, output_path):
         # Clean up the temporary file
         temp_file.close()
         os.remove(temp_file.name)
+
+
+
+
+
+class WhisperTranscription(metaclass=ABCWidgetMetaclass):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"file_path": ("STRING", {"default": "fullpath"})}}
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "transcribe_movie"
+    CATEGORY = "transcription"
+
+    def transcribe_movie(self, file_path):
+        import os
+        import time
+        import numpy as np
+        import whisper as wh
+        import moviepy as mp
+        try:
+            model = wh.load_model("medium.en")
+            filename = os.path.basename(file_path)
+            audio_file_path = f"audio_{filename}.wav"
+
+            video = mp.VideoFileClip(file_path)
+            video.audio.write_audiofile(audio_file_path)
+
+            res = wh.transcribe(model=model, audio=audio_file_path)
+            segs = res["segments"]
+            out = []
+            for seg in segs:
+                out.append(f"{seg['start']:3.3f} - {seg['end']:3.3f}: {seg['text']}")
+            ret = '\n'.join(out)
+
+            os.remove(audio_file_path)
+
+            return (ret,)
+
+        except Exception as e:
+            print(e)
+            return ("Error",)

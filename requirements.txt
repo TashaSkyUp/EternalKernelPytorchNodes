@@ -5,3 +5,5 @@ oauth2client
 httplib2
 GitPython
 librosa
+moviepy
+openai-whisper

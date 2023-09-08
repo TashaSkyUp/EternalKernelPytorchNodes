@@ -1,6 +1,12 @@
 import os
 
 try:
+    from line_profiler_pycharm import profile
+except ImportError as e:
+    print("ETK> line_profiler_pycharm not found, skipping it")
+    profile = lambda x: x
+
+try:
     from utils import etk_deep_copy as deepcopy
 except ImportError as e:
     from custom_nodes.EternalKernelLiteGraphNodes.utils import etk_deep_copy as deepcopy
@@ -22,8 +28,8 @@ if testing:
             pass
 else:
     try:
-        from nodes import CLIPTextEncode, VAEEncode, VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, \
-            SaveImage
+        from nodes import VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage
+        from nodes_examples import CLIPTextEncode, VAEEncode, SaveImage
 
         from nodes import common_ksampler
 
@@ -213,11 +219,17 @@ class TinyTxtToImg:
     RETURN_NAMES = ("image", "FUNC", "latent", "positive", "negative",)
     FUNCTION = "tinytxt2img"
 
+    @profile
     def tinytxt2img(self, **kwargs):
         """ use the imports from nodes to generate an image from text """
 
         import random
         import json
+        import gc
+
+        # Create a stream for computation
+        gpu_stream = torch.cuda.Stream(device="cuda")
+        cpu_stream = torch.Stream()
 
         # kwargs = deepcopy(kwargs)
 
@@ -230,6 +242,8 @@ class TinyTxtToImg:
         overrides = kwargs.get("overrides", "")
         name = kwargs.get("name", "tinytxt2img")
         FUNC = kwargs.get("FUNC", None)
+        render_what = kwargs.get("render_what", "image")
+
         self.latent_image = kwargs.get("latent", None)
         self.pos_cond = kwargs.get("pos_cond", None)
         self.neg_cond = kwargs.get("neg_cond", None)
@@ -273,7 +287,6 @@ class TinyTxtToImg:
                                                 TinyTxtToImg.share_clip,
                                                 TinyTxtToImg.share_vae
                                                 )
-
 
         self.cfg = 8
         self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
@@ -321,27 +334,54 @@ class TinyTxtToImg:
                     print(e)
                     raise ValueError("advanced clip encoder failed")
 
-        #if not self.latent_image == None:
-            #self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
+        if self.latent_image == None:
+            self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
-        self.KSampler = KSampler()
-        self.samples = self.KSampler.sample(
-            model=self.mdl,
-            seed=self.seed,
-            steps=self.steps,
-            cfg=self.cfg,
-            sampler_name=self.sampler_name,
-            scheduler=self.scheduler,
-            latent_image=self.latent_image,
-            pos_cond=self.pos_cond,
-            neg_cond=self.neg_cond,
-            positive=self.pos_cond,
-            negative=self.neg_cond,
-            denoise=self.denoise,
-            one_seed_per_batch=self.one_seed_per_batch)[0]
-        # self.vae.offload_device = torch.device("cuda")
-        image = VAEDecode.decode(None, self.vae, self.samples)[0]
-        image = image.detach().cpu()
+        if "latent" in render_what or "all" in render_what:
+            self.KSampler = KSampler()
+            self.samples = self.KSampler.sample(
+                model=self.mdl,
+                seed=self.seed,
+                steps=self.steps,
+                cfg=self.cfg,
+                sampler_name=self.sampler_name,
+                scheduler=self.scheduler,
+                latent_image=self.latent_image,
+                pos_cond=self.pos_cond,
+                neg_cond=self.neg_cond,
+                positive=self.pos_cond,
+                negative=self.neg_cond,
+                denoise=self.denoise,
+                one_seed_per_batch=self.one_seed_per_batch)[0]
+
+        if "image" in render_what or "all" in render_what:
+            # Move the samples to the GPU
+            self.samples["samples"] = self.samples["samples"].to("cuda", non_blocking=True)
+
+            # Move VAE model to the GPU asynchronously
+            self.vae.first_stage_model.to("cuda:0", non_blocking=True)
+            self.vae.device = torch.device(torch.device("cuda:0"))
+            torch.cuda.empty_cache()
+
+            decoded_images = self.vae.decode(self.samples["samples"])
+            image = decoded_images.to("cpu", non_blocking=True)
+
+            self.vae.first_stage_model.to("cpu", non_blocking=True)
+            self.vae.device = torch.device(torch.device("cpu"))
+            torch.cuda.empty_cache()
+            gc.collect()
+            # Perform VAEDecode using samples in the computation stream
+            # with torch.cpu.stream(cpu_stream):
+            #    decoded_images = self.vae.decode(self.samples["samples"])
+
+            # Synchronize computation stream before moving model back to CPU
+            # torch.cuda.synchronize()
+
+            # Move VAE model back to CPU asynchronously
+            # self.vae.first_stage_model.to("cpu", non_blocking=True)
+
+            # Convert the decoded image to CPU
+
         self.FUNC = self.tinytxt2img
         self.ARGS = kwargs
         ret = (image,
@@ -1268,7 +1308,8 @@ class StackImages:
                 "image2": ("IMAGE",),
                 "number_of_images": ("INT", {"default": 2, "min": 2, "max": 100}),
                 # an optionbox with "all" or "upto", model after "one seed per batch" in the sampler
-                "mode": (["all", "upto"], {"default": "all"}),
+                "mode": (["all", "one_for_one", "upto"], {"default": "all"}),
+                "number_of_repeats": ("INT", {"default": 1, "min": 1, "max": 100}),
 
             }, }
 
@@ -1277,13 +1318,11 @@ class StackImages:
 
     CATEGORY = "ETK/image"
 
-    def stackme(self, image1, image2=None, number_of_images=2, mode="all"):
+    def stackme(self, image1, image2=None, number_of_images=2, mode="all", number_of_repeats=1):
         # import modules to help clear memory
         import gc
         import torch
         import torch.cuda
-
-
 
         """
         stacks two images on top of each other
@@ -1295,36 +1334,51 @@ class StackImages:
         if image2 is not None:
             image2 = image2.clone()
 
-        #gc.collect()
-        #torch.cuda.empty_cache()
+        # gc.collect()
+        # torch.cuda.empty_cache()
 
         del gc.garbage[:]
         gc.collect()
         torch.cuda.empty_cache()
 
+        # apply number of repeats
 
-
-
-
-
-
-
-        if image2 is not None:
+        if mode == "all" and image2 is not None:
             image2 = image2.clone()
-            stacked = torch.cat((image1, image2), dim=0)
-        else:
-            stacked = torch.cat((image1, image1), dim=0)
+            out = torch.cat((image1, image2), dim=0)
+        elif mode == "all" and image2 is None:
+            out = image1.clone()
+        elif mode == "one_for_one" and image2 is not None:
+            # for each image in image1, add each to the output
+            out_size = min(image1.shape[0], image2.shape[0])
+            holder = torch.zeros((out_size, image1.shape[1], image1.shape[2], image1.shape[3]))
+            for i in range(out_size):
+                holder[i, :, :, :] = image2[i, :, :, :]
+            out = holder
+        elif mode == "one_for_one" and image2 is None:
+            # this might mean that the user whats each index repeated num times
+            out_size = number_of_repeats * image1.shape[0]
+            out = torch.zeros((out_size, image1.shape[1], image1.shape[2], image1.shape[3]))
+            for i in range(out_size):
+                out[i, :, :, :] = image1[i % image1.shape[0], :, :, :]
 
-        if mode == "all":
-            if number_of_images > 2:
-                while stacked.shape[0] < number_of_images:
-                    stacked = torch.cat((stacked, stacked), dim=0)
-                print(stacked.shape)
-                out = stacked[:number_of_images, :, :, :]
-            else:
-                # stack them all together regardless of the first dimension
-                out = torch.cat((image1, image2), dim=0)
-                print(stacked.shape)
+        elif mode == "upto" and image2 is not None:
+            # stack them all together but then only return the first number_of_images
+            out = torch.cat((image1, image2), dim=0)
+            out = out[:number_of_images, :, :, :]
+
+        elif mode == "upto" and image2 is None:
+            out = image1.clone()
+            out = out[:number_of_images, :, :, :]
+
+        if number_of_repeats > 1:
+            out = out.repeat(number_of_repeats, 1, 1, 1)
+
+        # make sure to apply number of images
+        out = out[:number_of_images, :, :, :]
+
+        torch.cuda.empty_cache()
+        gc.collect()
 
         return (out,)
 
@@ -1685,7 +1739,10 @@ class TextRender:
                 # For blank lines, add a blank line of the previous line's height
                 y_offset += previous_height + line_spacing
             else:
-                w, h = d.textsize(line, font=font)
+                #w, h = d.textsize(line, font=font)
+                (left, top, right, bottom) = d.textbbox((0, 0), text=line, font=font)
+                w = right - left
+                h = bottom - top
                 previous_height = h  # Update the previous height
 
                 if w > width:
