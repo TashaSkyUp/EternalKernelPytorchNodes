@@ -337,7 +337,7 @@ class TinyTxtToImg:
         if self.latent_image == None:
             self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
-        if "latent" in render_what or "all" in render_what:
+        if "latent" in render_what or "all" in render_what or "image" in render_what:
             self.KSampler = KSampler()
             self.samples = self.KSampler.sample(
                 model=self.mdl,
@@ -384,6 +384,9 @@ class TinyTxtToImg:
 
         self.FUNC = self.tinytxt2img
         self.ARGS = kwargs
+
+        self.samples["samples"] = self.samples["samples"].to("cpu", non_blocking=True)
+
         ret = (image,
                self,
                self.samples,
@@ -1653,33 +1656,159 @@ class TextRender:
                 }),
                 "color": ("STRING", {
                     "default": "#000000"
-                })
+                }),
+                "func_only": ([True, False], {"default": False}),
+                "stroke fill": ("STRING", {"default": "#000000"}),
+                "stroke width": ("INT", {"default": 1, "min": 1, "max": 100, "step": 1}),
             }
         }
 
     CATEGORY = "ETK/text"
 
-    RETURN_TYPES = ("IMAGE", "IMAGE",)
-    RETURN_NAMES = ("image", "image rgba",)
+    RETURN_TYPES = ("IMAGE", "IMAGE", "FUNC",)
+    RETURN_NAMES = ("image", "image rgba", "FUNC(**kwargs)",)
 
     FUNCTION = "render_text"
 
-    def render_text(self, text, x, y, width, height, font='Arial', size=16, color='#000000'):
+    @profile
+    def render_text(self, text, x, y, width, height, font='Arial', size=16, color='#888888', func_only=False, **kwargs):
         """
         This function renders the provided text at specified location, with the given width and height.
         The text is rendered in the provided font, size, and color.
-
-        >>> tr = TextRender()
-        >>> result = tr.render_text('Hello, world!', 128, 128, 512, 512,"Arial",16,"#FF11000")
-        >>> torch_image_show(result[0][0])
         """
+        from PIL import ImageFont, ImageDraw
+        import gc
+        import psutil
+        process = psutil.Process();
+        memory_info = process.memory_info();
+        start_memory = memory_info.rss / (1024 * 1024)
 
-        font_name = font
+        sw = kwargs.get("stroke width", None)
+        sf = kwargs.get("stroke fill", None)
+
+        @profile
+        def _wrap_text(font, line, max_width, d):
+            words = line.split(' ')
+            new_line = ''
+            lines = []
+            for word in words:
+                temp_line = new_line + word + ' '
+
+
+                #w, _ = d.textsize(temp_line, font=font)
+
+                # w, h = d.textsize(line, font=font)
+                (left, top, right, bottom) = d.textbbox((0, 0), text=temp_line, font=font)
+                w = right - left
+                h = bottom - top
+                previous_height = h  # Update the previous height
+
+
+
+
+                if w > max_width:
+                    lines.append(new_line.strip())
+                    new_line = word + ' '
+                else:
+                    new_line = temp_line
+
+            lines.append(new_line.strip())
+            wrapped_line = '\n'.join(lines)
+            return wrapped_line
+
+        @profile
+        def _render_text(font_name, image, size, text, x, y, allow_wrap=True, allow_shrink=True, sw=None, sf=None):
+            width = image.size[0]
+            d = ImageDraw.Draw(image)
+            font = ImageFont.truetype(font_name, size)
+            lines = text.split('\n')
+
+            shrink_threshold = 24  # The minimum font size before we start wrapping text
+            line_spacing = 5  # The constant space between lines
+            y_offset = y
+            previous_height = 0  # Store the height of the previous line
+
+            for i, line in enumerate(lines):
+                if line.strip() == '' or line.strip() == '\n':
+                    # For blank lines, add a blank line of the previous line's height
+                    y_offset += previous_height + line_spacing
+                else:
+                    # w, h = d.textsize(line, font=font)
+                    (left, top, right, bottom) = d.textbbox((0, 0), text=line, font=font)
+                    w = right - left
+                    h = bottom - top
+                    previous_height = h  # Update the previous height
+
+                    if w > width:
+                        if allow_shrink:
+                            new_font_size = int(size * width / w)
+                            if new_font_size >= shrink_threshold:
+                                font = ImageFont.truetype(font_name, new_font_size)
+                            else:
+                                # The font size is too small, start wrapping text
+                                wrapped_line = _wrap_text(font, line, width, d)
+                                y_offset = _render_text(font_name,
+                                                        image,
+                                                        size,
+                                                        wrapped_line, x, y_offset + line_spacing,
+                                                        allow_wrap=False,
+                                                        allow_shrink=False)
+                                continue  # Skip to the next line
+
+                        if allow_wrap:
+                            # Wrap the text
+                            wrapped_line = _wrap_text(font, line, width, d)
+                            y_offset = _render_text(font_name,
+                                                    image,
+                                                    new_font_size,
+                                                    wrapped_line,
+                                                    x,
+                                                    y_offset + line_spacing,
+                                                    allow_wrap=False,
+                                                    allow_shrink=False)
+                            continue  # Skip to the next line
+
+                    # Draw the line
+                    x_offset = x + (width - w) / 2
+                    if sw or sw:
+                        d.text((x_offset, y_offset), line, font=font, fill="#FFFFFF", stroke_width=sw, stroke_fill=sf)
+                    else:
+                        d.text((x_offset, y_offset), line, font=font, fill="#FFFFFF")
+
+                    y_offset += h + line_spacing  # Move y_offset to the bottom of the last line drawn plus the line spacing
+            # debug print the amount of free memory in torch
+
+            return y_offset
+
+        if func_only:
+            def lll(new_kwargs):
+                if "font" not in new_kwargs:
+                    new_kwargs["font"] = kwargs.get("font_name", font)
+                if "color" not in new_kwargs:
+                    new_kwargs["color"] = color
+                if "size" not in new_kwargs:
+                    new_kwargs["size"] = size
+                if "text" not in new_kwargs:
+                    new_kwargs["text"] = text
+                if "x" not in new_kwargs:
+                    new_kwargs["x"] = x
+                if "y" not in new_kwargs:
+                    new_kwargs["y"] = y
+                if "width" not in new_kwargs:
+                    new_kwargs["width"] = width
+                if "height" not in new_kwargs:
+                    new_kwargs["height"] = height
+
+                return TextRender.render_text(None, **new_kwargs)
+
+            return (None, None, lll,)
+
+        font_name = kwargs.get("font_name", font)
 
         # Create an empty image with RGBA channels
         image = Image.new('RGBA', (width, height))
 
-        self._render_text(font_name, image, size, text, x, y, allow_shrink=True)
+        _render_text(font_name, image, size, text, x, y, allow_shrink=True, sf=sf, sw=sw)
 
         # Convert the image to numpy array
         image_array = np.array(image)
@@ -1700,87 +1829,19 @@ class TextRender:
 
         # make a copy for the RGB image
         image_rgb = image_tensor[..., :3]
-        print(torch.cuda.memory_stats())
-        return (image_rgb, image_tensor,)
+        # print(torch.cuda.memory_stats())
+        del image
+        del image_array
+        del color_arr
 
-    from PIL import ImageFont, ImageDraw
-    from PIL import ImageFont, ImageDraw
+        process = psutil.Process();
+        memory_info = process.memory_info();
+        end_memory = memory_info.rss / (1024 * 1024)
+        print("Memory used: {} MB".format(end_memory - start_memory))
 
-    def _wrap_text(self, font, line, max_width, d):
-        words = line.split(' ')
-        new_line = ''
-        lines = []
-        for word in words:
-            temp_line = new_line + word + ' '
-            w, _ = d.textsize(temp_line, font=font)
-            if w > max_width:
-                lines.append(new_line.strip())
-                new_line = word + ' '
-            else:
-                new_line = temp_line
-
-        lines.append(new_line.strip())
-        wrapped_line = '\n'.join(lines)
-        return wrapped_line
-
-    def _render_text(self, font_name, image, size, text, x, y, allow_wrap=True, allow_shrink=True):
-        width = image.size[0]
-        d = ImageDraw.Draw(image)
-        font = ImageFont.truetype(font_name, size)
-        lines = text.split('\n')
-
-        shrink_threshold = 24  # The minimum font size before we start wrapping text
-        line_spacing = 5  # The constant space between lines
-        y_offset = y
-        previous_height = 0  # Store the height of the previous line
-
-        for i, line in enumerate(lines):
-            if line.strip() == '' or line.strip() == '\n':
-                # For blank lines, add a blank line of the previous line's height
-                y_offset += previous_height + line_spacing
-            else:
-                #w, h = d.textsize(line, font=font)
-                (left, top, right, bottom) = d.textbbox((0, 0), text=line, font=font)
-                w = right - left
-                h = bottom - top
-                previous_height = h  # Update the previous height
-
-                if w > width:
-                    if allow_shrink:
-                        new_font_size = int(size * width / w)
-                        if new_font_size >= shrink_threshold:
-                            font = ImageFont.truetype(font_name, new_font_size)
-                        else:
-                            # The font size is too small, start wrapping text
-                            wrapped_line = self._wrap_text(font, line, width, d)
-                            y_offset = self._render_text(font_name,
-                                                         image,
-                                                         size,
-                                                         wrapped_line, x, y_offset + line_spacing,
-                                                         allow_wrap=False,
-                                                         allow_shrink=False)
-                            continue  # Skip to the next line
-
-                    if allow_wrap:
-                        # Wrap the text
-                        wrapped_line = self._wrap_text(font, line, width, d)
-                        y_offset = self._render_text(font_name,
-                                                     image,
-                                                     new_font_size,
-                                                     wrapped_line,
-                                                     x,
-                                                     y_offset + line_spacing,
-                                                     allow_wrap=False,
-                                                     allow_shrink=False)
-                        continue  # Skip to the next line
-
-                # Draw the line
-                x_offset = x + (width - w) / 2
-                d.text((x_offset, y_offset), line, font=font, fill="#FFFFFF")
-                y_offset += h + line_spacing  # Move y_offset to the bottom of the last line drawn plus the line spacing
-        # debug print the amount of free memory in torch
-
-        return y_offset
+        image_rgb = image_rgb.to("cpu")
+        image_tensor = image_tensor.to("cpu")
+        return (image_rgb, image_tensor, None,)
 
 
 @ETK_image_base

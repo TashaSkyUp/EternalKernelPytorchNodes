@@ -122,3 +122,55 @@ class JoinAudioFiles:
             file_bytes = f.read()
 
         return (output_path, file_bytes, metadata,)
+
+@ETK_audio_base
+class ExtractAudioFromVideo:
+    """ Extracts audio from a video file and saves it as an audio file with a specified format and bitrate """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_path": ("STRING", {"multiline": False, "default": ""}),
+                "format":(["wav", "mp3"], {"default": "wav"}),
+                "output_path": ("STRING", {"multiline": False, "default": ""}),
+            },
+            "optional": {
+                "bitrate (MP3)": ("INT", {"default": 192})  # Default bitrate value (change as needed)
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "BYTES")
+    RETURN_NAMES = ("output_wave_file_path", "audio_bytes")
+    FUNCTION = 'extract_audio_from_video'
+    CATEGORY = 'ETK/audio'
+
+    def extract_audio_from_video(self, **kwargs):
+        import moviepy.editor as mp
+        import io
+
+        kwargs = copy.deepcopy(kwargs)
+        video_path = kwargs.get('video_path')
+        output_path = kwargs.get('output_path',"tmp.wav")
+        audio_format = kwargs.get('format', 'wav')
+        bitrate = kwargs.get('bitrate', None)  # Default bitrate is None
+
+        # Load the video clip
+        video_clip = mp.VideoFileClip(video_path)
+
+        # Determine the appropriate codec based on the audio format
+        if audio_format == 'wav':
+            codec = "pcm_s16le"  # For WAV format
+        elif audio_format == 'mp3':
+            codec = "mp3"  # For MP3 format
+
+        # Extract audio and save it with the specified format and bitrate
+        audio_clip = video_clip.audio
+        audio_clip.write_audiofile(output_path, codec=codec, bitrate=bitrate)
+
+        # Read the generated audio file as bytes
+        audio_bytes = None
+        with open(output_path, 'rb') as audio_file:
+            audio_bytes = audio_file.read()
+
+        return (output_path, audio_bytes,)

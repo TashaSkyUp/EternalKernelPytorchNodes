@@ -11,7 +11,9 @@ from abc import ABC, ABCMeta, abstractmethod
 from typing import List, Tuple, Union
 import cv2
 import torch
+import torchaudio
 from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
+from line_profiler import profile
 from torch import dtype
 from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
@@ -163,12 +165,9 @@ class ABCABCVideoFileToImage(ABCVideoWidget, metaclass=ABCWidgetMetaclass):
                 "idx_slice_stop": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 1}),
                 "slice_idx_step": ("INT", {"min": 0, "max": 9999, "step": 1, "default": 1}),
                 "idx": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
+                "func_only": ([True, False], {"default": False}),
             },
 
-            "optional":
-                {"text":
-                     ("STRING", {"multiline": False}),
-                 }
         }
 
     @abstractmethod
@@ -189,6 +188,8 @@ class VideoToFramesFolder(ABCVideoFileToABCVideoFolder, metaclass=ABCWidgetMetac
         # self.INPUT_TYPES = lambda s: self.old().update({})
 
     def handler(self, video_in, folder_out, text):
+        import time
+        start = time.time()
         video_in_path = os.path.join(self.input_dir, video_in)
         video_out_path = os.path.join(self.output_dir, folder_out)
 
@@ -199,6 +200,64 @@ class VideoToFramesFolder(ABCVideoFileToABCVideoFolder, metaclass=ABCWidgetMetac
             cv2.imwrite(os.path.join(video_out_path, "frame%d.jpg" % count), image)
             success, image = vidcap.read()
             count += 1
+
+        vidcap.release()
+        end = time.time()
+        print("time elapsed: ", end - start)
+        return (folder_out,)
+
+
+class VideoToFramesFolderFFMPEG(ABCVideoFileToABCVideoFolder, metaclass=ABCWidgetMetaclass):
+    """use ffmpeg to open the video and use it as a source for image stacks, use PNG or jpeg with quality 100"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+            {
+                "video_in": ("STRING", {"default": "full_path_to_folder"}),
+                "folder_out": ("STRING", {"default": "full_path_to_folder"}),
+                "format": (["PNG", "JPEG"], {"default": "PNG"}),
+            },
+
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("folder_out",)
+
+    def __init__(self):
+        super().__init__()
+        self.old = self.INPUT_TYPES
+        # self.INPUT_TYPES = lambda s: self.old().update({})
+
+    def handler(self, video_in, folder_out, format):
+        import time
+        start = time.time()
+        video_in_path = os.path.join(self.input_dir, video_in)
+        video_out_path = os.path.join(self.output_dir, folder_out)
+
+        if not os.path.exists(video_out_path):
+            os.makedirs(video_out_path)
+
+        # specifically this calls ffmpeg with the following arguments:
+        # -i means input file
+        # -qscale:v means quality scale video, default is 2, which is a good compromise between size and quality
+        # 1 is the quality scale value, which is a value between 1 and 31, where 1 is the highest quality
+
+        start = time.time()
+
+        if format == "JPEG":
+            subprocess.call(
+                ["ffmpeg", "-i", video_in_path, "-qscale:v", "1", os.path.join(video_out_path, "frame%05d.jpg")])
+            end = time.time()
+            print("ffmpeg jpg process took {} seconds".format(end - start))
+
+        elif format == "PNG":
+            subprocess.call(["ffmpeg", "-i", video_in_path, os.path.join(video_out_path, "frame%05d.png")])
+            end = time.time()
+            print("ffmpeg png process took {} seconds".format(end - start))
+
+        else:
+            raise ValueError("format must be either PNG or JPEG")
 
         return (folder_out,)
 
@@ -532,17 +591,30 @@ class GetImageStackStatistics(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetac
         return (out_str, out_hist_image,)
 
 
+@profile
 class VideoFileToImageStack(ABCABCVideoFileToImage, metaclass=ABCWidgetMetaclass):
     """Use cv2 to open a video and save the videos individual frames"""
+    RETURN_TYPES = ("IMAGE", "FUNC",)
+    RETURN_NAMES = ("image_stack", "FUNC(**kwargs)",)
 
-    def handler(self, video_in, text, idx_slice_start, idx_slice_stop, slice_idx_step, idx):
+    def handler(self, video_in, idx_slice_start, idx_slice_stop, slice_idx_step, idx, func_only=False):
         """
         Return slices of time from the video, sequences of images, defined by the start, stop and step
         - torch tensors (T,H,W,C)
         """
+        import sys
+        import gc
+        # print memory usage
+        print(f"Memory usage: {sys.getsizeof(self)} bytes")
+
+        if func_only:
+            return (None, VideoFileToImageStack.handler,)
+
         image_list = []
-        video_in_fp = os.path.join(self.input_dir, video_in)
+        video_in_fp = video_in
         vidcap = cv2.VideoCapture(video_in_fp)
+        max_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+
         if not vidcap.isOpened():
             print("Error: Unable to open video file")
             return
@@ -550,6 +622,9 @@ class VideoFileToImageStack(ABCABCVideoFileToImage, metaclass=ABCWidgetMetaclass
         start = (idx * slice_idx_step) + idx_slice_start
         stop = (idx * slice_idx_step) + idx_slice_stop
         slice_length = stop - start
+
+        if (start + slice_length) > max_frames:
+            raise ValueError(f"idx_slice_stop ({idx_slice_stop}) is greater than the max frames ({max_frames})")
 
         for frame_count in range(start, start + slice_length):
             # Seek to frame_count frame
@@ -563,12 +638,24 @@ class VideoFileToImageStack(ABCABCVideoFileToImage, metaclass=ABCWidgetMetaclass
 
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_list.append(image)
+            print(f"Memory usage: {sys.getsizeof(self)} bytes")
 
+        vidcap.release()
         # Convert list of images to tensor (T,H,W,C)
-        tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
-        tensor = tensor / 255.0
+        try:
+            tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
+        except RuntimeError as e:
+            print("Error: Unable to convert image list to tensor")
+            raise e
 
-        return (tensor,)
+        tensor = tensor / 255.0
+        del image_list
+        del vidcap
+        del image
+        gc.collect()
+        # print memory usage
+        print(f"Memory usage: {sys.getsizeof(self)} bytes")
+        return (tensor, VideoFileToImageStack.handler,)
 
 
 class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
@@ -1177,6 +1264,9 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
         import imageio
         import audioread
         import cv2
+        import torchvision
+
+        use_torchvision = True
 
         # video_dir = kwargs["video_dir"]
 
@@ -1222,52 +1312,54 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
         else:
             video_fps = frames_length / fps_length_value
 
-        folder_out = "temp_frames_folder"
+        if use_torchvision ==False:
+            writer = imageio.get_writer(video_out_path, fps=float(video_fps))
 
-        # Now, read the frames from disk as numpy data
-        import tempfile
-        # use tempfile to create a temporary folder
-        with tempfile.TemporaryDirectory() as temp_dir:
-            frames_out_path = temp_dir
-
-            # Convert the image stack to frames on disk
-            frame_folder_handler = ImageStackToVideoFramesFolder()
-            frame_folder_handler.handler(image_stack=image_stack, folder_out=frames_out_path)
-
-            frames = []
-            for fl in sorted(os.listdir(frames_out_path)):
-                # if the fl is an actual image file
-                if not fl.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    continue
-                # create the numpy array
-                frame = cv2.imread(os.path.join(frames_out_path, fl))
-                # convert to RGB
+            for frame_data in image_stack:
+                frame = np.array(frame_data)  # Convert torch tensor to numpy array if needed
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # append to the list of frames
-                frames.append(frame)
+                writer.append_data(frame)
 
-        writer = imageio.get_writer(video_out_path, fps=video_fps)
-        for frame in frames:
-            writer.append_data(frame)
-        writer.close()
+            if audio_file is not None:
+                difference = video_length - audio_length
 
-        if audio_file is not None:
-            if audio_length > video_length:
-                while video_length < audio_length:
-                    image_stack = np.concatenate((image_stack, image_stack[-1:]), axis=0)
-                    video_length += 1 / video_fps
-                    frames_length += 1
+                needed_extra_frames = int(difference * video_fps)
 
-            args = [
-                "-i", video_out_path,
-                "-i", audio_file,
-                "-c:v", codec,
-                "-b:v", str(bitrate),
-                "-c:a", "aac",
-                "-strict", "experimental",
-                video_out_path
-            ]
-            run_ffmpeg_command(args)
+                if needed_extra_frames > 0:
+                    for i in range(needed_extra_frames):
+                        writer.append_data(frame)
+
+                writer.close()
+
+                args = [
+                    "-i", video_out_path,
+                    "-i", audio_file,
+                    "-c:v", codec,
+                    "-b:v", str(bitrate),
+                    "-c:a", "aac",
+                    "-strict", "experimental",
+                    "-y",
+                    video_out_path.replace(".mp4", "_with_audio.mp4")
+                ]
+                run_ffmpeg_command(args)
+            else:
+                writer.close()
+
+        if use_torchvision:
+            audio_tensor = None
+            if audio_file is not None:
+                aud_sr = torchaudio.io.StreamReader(audio_file)
+
+
+
+
+
+
+            torchvision.io.write_video(filename=video_out_path,
+                                       video_array=image_stack,
+                                       fps=video_fps,
+                                       audio_array=audio_tensor,
+                                       )
 
         return (self, video_out_path,)
 
@@ -1459,43 +1551,293 @@ def combine_videos(video_paths, base_input_directory, output_path):
         os.remove(temp_file.name)
 
 
+def transcribe_to_segs(input_filename):
+    import whisper as wh
+    import folder_paths as fp
 
+    if not os.sep in input_filename:
+        input_dir = fp.input_directory
+        full_path = os.path.join(input_dir, input_filename)
+    else:
+        full_path = input_filename
+    # check that the file exists
+
+    if not os.path.exists(full_path):
+        raise ValueError(f"File {full_path} does not exist.")
+    # check that it is a file
+    if not os.path.isfile(full_path):
+        raise ValueError(f"{full_path} is not a file.")
+
+    model = wh.load_model("medium.en")
+
+    res = wh.transcribe(model=model, audio=full_path, word_timestamps=True)
+    segs = res["segments"]
+
+    return segs
 
 
 class WhisperTranscription(metaclass=ABCWidgetMetaclass):
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"file_path": ("STRING", {"default": "fullpath"})}}
+        return {"required": {"input_filename": ("STRING", {"default": "fullpath"})}}
 
-    RETURN_TYPES = ("STRING",)
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("lines_out", "words_out",)
     FUNCTION = "transcribe_movie"
     CATEGORY = "transcription"
 
-    def transcribe_movie(self, file_path):
-        import os
-        import time
-        import numpy as np
-        import whisper as wh
-        import moviepy as mp
+    def transcribe_movie(self, input_filename):
+
+        import folder_paths as fp
+        input_dir = fp.input_directory
+        full_path = os.path.join(input_dir, input_filename)
+
         try:
-            model = wh.load_model("medium.en")
-            filename = os.path.basename(file_path)
-            audio_file_path = f"audio_{filename}.wav"
+            segs = transcribe_to_segs(full_path)
 
-            video = mp.VideoFileClip(file_path)
-            video.audio.write_audiofile(audio_file_path)
-
-            res = wh.transcribe(model=model, audio=audio_file_path)
-            segs = res["segments"]
-            out = []
+            lines_out = []
             for seg in segs:
-                out.append(f"{seg['start']:3.3f} - {seg['end']:3.3f}: {seg['text']}")
-            ret = '\n'.join(out)
+                lines_out.append(f"{seg['start']:3.3f} - {seg['end']:3.3f}: {seg['text']}")
 
-            os.remove(audio_file_path)
+            lines_out = '\n'.join(lines_out)
 
-            return (ret,)
+            words_out = []
+            for seg in segs:
+                words_out.append([])
+                for word in seg['words']:
+                    line = f"{word['start']:3.3f} - {word['end']:3.3f}: {word['word']}"
+                    words_out[-1].append(line)
+
+            words_out = '\n'.join(['\n'.join(x) for x in words_out])
+
+            return (lines_out, words_out,)
 
         except Exception as e:
             print(e)
             return ("Error",)
+
+
+class WhisperTranscribeToFrameIDXandWords(metaclass=ABCWidgetMetaclass):
+    """Just like WhisperTranscription, but returns a list of frame numbers and words instead of a string."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        # needs full path to video file
+        # needs fps for conversion
+        ret = {"required": {"input_filename": ("STRING", {"default": "fullpath"}),
+                            "fps": ("INT", {"default": 30})}}
+        return ret
+
+    RETURN_TYPES = ("LIST", "LIST", "LIST",)
+    RETURN_NAMES = ("frame_idx", "words_out", "combined",)
+    FUNCTION = "transcribe_movie"
+    CATEGORY = "transcription"
+
+    def transcribe_movie(self, input_filename, fps):
+        import folder_paths as fp
+        input_dir = fp.input_directory
+        full_path = os.path.join(input_dir, input_filename)
+        try:
+            segs = transcribe_to_segs(full_path)
+            frame_idx = []
+            words_out = []
+            combined = []
+            for seg in segs:
+                for word in seg['words']:
+                    start_frame = int(word['start'] * fps)
+                    end_frame = int(word['end'] * fps)
+                    word_text = word['word']
+
+                    frame_idx.append((start_frame, end_frame))
+                    words_out.append(word_text)
+                    combined.append((start_frame, end_frame, word_text))
+
+            # now we fill in the gaps so the entire video is covered by some word
+            # we do this by finding if there is a gap then changing the frame stamps of the last word and the next word
+            # to cover the gap
+            for i in range(len(frame_idx) - 1):
+                if frame_idx[i][1] < frame_idx[i + 1][0]:
+                    # there is a gap
+                    gap_len = frame_idx[i + 1][0] - frame_idx[i][1]
+                    to_previous_word = gap_len // 2
+                    to_next_word = gap_len - to_previous_word
+
+                    frame_idx[i] = (frame_idx[i][0], frame_idx[i][1] + to_previous_word)
+                    frame_idx[i + 1] = (frame_idx[i + 1][0] - to_next_word, frame_idx[i + 1][1])
+
+                    combined[i] = (combined[i][0], combined[i][1] + to_previous_word, combined[i][2])
+                    combined[i + 1] = (combined[i + 1][0] - to_next_word, combined[i + 1][1], combined[i + 1][2])
+
+                    # leave words_out alone
+
+            return (frame_idx, words_out, combined,)
+        except Exception as e:
+            print(e)
+            return ("Error",)
+
+
+@profile
+def get_text_frames(word_idx, words_data, x: callable, y: callable, size: (), text_kwargs: dict, style="default"):
+    from .image import TextRender as text_render_class
+    text_render = text_render_class().render_text
+
+    start = words_data[word_idx][0]
+    end = words_data[word_idx][1]
+    word_text = words_data[word_idx][2]
+    frame_length = end - start
+
+    # if x and y are not callables
+    if not callable(x):
+        x = lambda i: x
+    if not callable(y):
+        y = lambda i: y
+
+    out_frames = []
+    for i in range(start, end):
+        it_dict = dict()
+        it_dict["text"] = word_text
+        it_dict["x"] = x(i / float(frame_length))
+        it_dict["y"] = y(i / float(frame_length))
+        it_dict["width"] = size[0]
+        it_dict["height"] = size[1]
+
+        it_dict.update(text_kwargs)
+        # it_dict["size"] = 128
+        # it_dict["color"] = "#ffffff"
+        # it_dict["func_only"] = False
+        # it_dict["stroke fill"] = "#050505"
+        # it_dict["stroke width"] = 5
+
+        text_img = text_render(**it_dict)
+        out_frames.append(text_img[0])
+    return out_frames
+
+
+class AddTranscriptionToVideo(metaclass=ABCWidgetMetaclass):
+    """
+    Add a transcription to a video.  Requires a video and transcription data.
+    transcription data must be [(start_frame, end_frame, word), ...]
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        # needs full path to video file
+        # needs fps for conversion
+        ret = {"required": {"video_file": ("STRING", {"default": "fullpath"}),
+                            "words": ("LIST", {"default": None}),
+                            }
+               }
+        return ret
+
+    RETURN_TYPES = ("IMAGE", "IMAGE",)
+    RETURN_NAMES = ("1 fps preview", "Full Video")
+    FUNCTION = "add_transcription_to_video"
+    CATEGORY = "transcription"
+
+    @profile
+    def add_transcription_to_video(self, **kwargs):
+        import torch
+        import gc
+
+        video_file = kwargs["video_file"]
+        words = kwargs["words"]
+
+        def create_video_frames_folder(video_file):
+            fnc = VideoToFramesFolderFFMPEG().handler
+            call_dict = dict()
+            call_dict["video_in"] = video_file
+            call_dict["folder_out"] = os.path.join(video_file, os.sep, "frames_tmp")
+            call_dict["format"] = "PNG"
+
+            tmp_video_folder = fnc(**call_dict)[0]
+            del fnc
+            del call_dict
+            gc.collect()
+            return tmp_video_folder
+
+        def get_video_frames(start, end):
+            fnc = VideoFramesFolderToImageStack().handler
+            call_dict = dict()
+            call_dict["use_subfolders"] = False
+            call_dict["by_date_or_name"] = "NAME"
+            call_dict["folder_in"] = os.path.join(video_file, os.sep, "frames_tmp")
+            call_dict["idx_slice_start"] = 0
+            call_dict["idx_slice_stop"] = end - start
+            call_dict["slice_idx_step"] = 1
+            call_dict["idx"] = start
+            call_dict["use_float16"] = False
+
+            ret = fnc(**call_dict)[0]
+
+            return ret
+
+        def overlay_text_on_video(video_frames, text_frames):
+            import torch
+            # Create a mask for the text frames (where text is black)
+            text_mask = (text_frames == 0) * 1  # Assuming black is represented as 0 in text_frames
+
+            # Use the ~ operator to invert the boolean mask
+            # inverted_mask = text_mask
+
+            # Overlay text_frames on video_frames using the inverted_mask
+            overlaid_frames = video_frames * text_mask + text_frames
+
+            return overlaid_frames
+
+        frames_out = []
+        num_frames = 0
+        frames_folder = create_video_frames_folder(video_file)
+        for w_idx in range(len(words)):
+            word_start = words[w_idx][0]
+            word_end = words[w_idx][1]
+            word = words[w_idx][2].strip()
+            print(f"word_start: {word_start}, word_end: {word_end}, word: {word}")
+
+            words_video_frames = get_video_frames(word_start, word_end)
+            i_width = words_video_frames.shape[2]
+            i_height = words_video_frames.shape[1]
+            text_frames = get_text_frames(word_idx=w_idx,
+                                          words_data=words,
+                                          x=lambda i: 0,
+                                          y=lambda i: 0,
+                                          size=(i_width, i_height),
+                                          text_kwargs={"size": 128, "color": "#ffffff", "func_only": False,
+                                                       "stroke fill": "#050505", "stroke width": 5,
+                                                       "font_name": "c:/Windows/Fonts/arial.ttf"})
+
+            text_frames = torch.cat(text_frames)
+
+            # Overlay text on video frames
+            video_frames_with_text = overlay_text_on_video(words_video_frames, text_frames)
+            frames_out.append(video_frames_with_text)
+            num_frames += video_frames_with_text.shape[0]
+            gc.collect()
+
+        # free memory
+        del words_video_frames
+        del text_frames
+        del video_frames_with_text
+
+        num_stks = len(frames_out)
+        # write to disk
+        for i, stk in enumerate(frames_out):
+            torch.save(stk, f"tmp_str_{i}.pt")
+        del frames_out
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # pre allocate tensor
+        y = torch.zeros((num_frames, i_height, i_width, 3), dtype=torch.float32, device="cpu")
+        # load each save and put into tensor
+        new_start = 0
+        for i in range(num_stks):
+            stk = torch.load(f"tmp_str_{i}.pt")
+            y[new_start:new_start + stk.shape[0]] = stk
+            new_start = new_start + stk.shape[0]
+            del stk
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        preview = y[::30].clone()
+
+        return (preview, y,)

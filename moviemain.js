@@ -72,7 +72,7 @@ app.registerExtension({
                         // Set widget value to filename
                         // filter to the widget that has the name "vide_in"
                         const widget = node.widgets.find(w => w.name === "video_in");
-                        widget.value = filename.filename;
+                        widget.value =  file.name;
 
 
 
