@@ -1,5 +1,5 @@
 import os
-
+import comfy
 try:
     from line_profiler_pycharm import profile
 except ImportError as e:
