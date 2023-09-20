@@ -29,7 +29,7 @@ if testing:
 else:
     try:
         from nodes import VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage
-        from nodes_examples import CLIPTextEncode, VAEEncode, SaveImage
+        from nodes import CLIPTextEncode, VAEEncode, SaveImage
 
         from nodes import common_ksampler
 
