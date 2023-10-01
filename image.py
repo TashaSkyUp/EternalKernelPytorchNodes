@@ -1,5 +1,6 @@
 import os
 import comfy
+
 try:
     from line_profiler_pycharm import profile
 except ImportError as e:
@@ -173,9 +174,9 @@ class TinyTxtToImg:
     def __init__(self):
         print("ETK> TinyTxtToImg init")
         import random
-        self.mdl = None
-        self.clp = None
-        self.vae = None
+        self.mdl = TinyTxtToImg.share_mdl
+        self.clp = TinyTxtToImg.share_clip
+        self.vae = TinyTxtToImg.share_vae
         self.vision = None
         self.steps = 10
         self.cfg = 8
@@ -201,6 +202,7 @@ class TinyTxtToImg:
                 "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],),
                 "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
                 "one_seed": ([True, False], {"default": False}),
+                "unload_model": ([True, False], {"default": True}),
 
             },
             "optional": {
@@ -228,11 +230,12 @@ class TinyTxtToImg:
         import gc
 
         # Create a stream for computation
-        gpu_stream = torch.cuda.Stream(device="cuda")
-        cpu_stream = torch.Stream()
+        # gpu_stream = torch.cuda.Stream(device="cuda")
+        # cpu_stream = torch.Stream()
 
         # kwargs = deepcopy(kwargs)
 
+        unload_model = kwargs.get("unload_model", True)
         prompt = kwargs.get("prompt", "")
         neg_prompt = kwargs.get("neg_prompt", "")
         clip_encoder = kwargs.get("clip_encoder", "comfy -ignore below")
@@ -315,6 +318,7 @@ class TinyTxtToImg:
             self.__dict__.update(FUNC(self.__dict__))
 
         if not self.pos_cond:
+            self.clp.cond_stage_model = self.clp.cond_stage_model.to("cuda")
             if clip_encoder == "comfy -ignore below":
                 self.clp_encode = lambda x: CLIPTextEncode.encode(None, self.clp, x)[0]
                 self.pos_cond = self.clp_encode(self.positive)
@@ -333,12 +337,18 @@ class TinyTxtToImg:
                 except Exception as e:
                     print(e)
                     raise ValueError("advanced clip encoder failed")
+            self.clp.cond_stage_model = self.clp.cond_stage_model.to("cpu")
+            import comfy.model_management as mm
 
+            torch.cuda.empty_cache()
+            gc.collect()
         if self.latent_image == None:
             self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
 
         if "latent" in render_what or "all" in render_what or "image" in render_what:
             self.KSampler = KSampler()
+            # self.mdl.offload_device = torch.device("cuda:0")
+            # self.mdl.load_device = torch.device("cuda:0")
             self.samples = self.KSampler.sample(
                 model=self.mdl,
                 seed=self.seed,
@@ -356,17 +366,17 @@ class TinyTxtToImg:
 
         if "image" in render_what or "all" in render_what:
             # Move the samples to the GPU
-            self.samples["samples"] = self.samples["samples"].to("cuda", non_blocking=True)
+            self.samples["samples"] = self.samples["samples"].to("cuda")
 
             # Move VAE model to the GPU asynchronously
-            self.vae.first_stage_model.to("cuda:0", non_blocking=True)
+            self.vae.first_stage_model = self.vae.first_stage_model.to("cuda:0")
             self.vae.device = torch.device(torch.device("cuda:0"))
             torch.cuda.empty_cache()
 
             decoded_images = self.vae.decode(self.samples["samples"])
-            image = decoded_images.to("cpu", non_blocking=True)
+            image = decoded_images.to("cpu")
 
-            self.vae.first_stage_model.to("cpu", non_blocking=True)
+            self.vae.first_stage_model.to("cpu")
             self.vae.device = torch.device(torch.device("cpu"))
             torch.cuda.empty_cache()
             gc.collect()
@@ -385,7 +395,7 @@ class TinyTxtToImg:
         self.FUNC = self.tinytxt2img
         self.ARGS = kwargs
 
-        self.samples["samples"] = self.samples["samples"].to("cpu", non_blocking=True)
+        self.samples["samples"] = self.samples["samples"].to("cpu")
 
         ret = (image,
                self,
@@ -1694,17 +1704,13 @@ class TextRender:
             for word in words:
                 temp_line = new_line + word + ' '
 
-
-                #w, _ = d.textsize(temp_line, font=font)
+                # w, _ = d.textsize(temp_line, font=font)
 
                 # w, h = d.textsize(line, font=font)
                 (left, top, right, bottom) = d.textbbox((0, 0), text=temp_line, font=font)
                 w = right - left
                 h = bottom - top
                 previous_height = h  # Update the previous height
-
-
-
 
                 if w > max_width:
                     lines.append(new_line.strip())
@@ -1906,6 +1912,153 @@ class FuncImageStackToImageStack:
         exec(code, my_globals, my_locals)
 
         return (my_locals["y_image"],)
+
+
+@ETK_image_base
+class ScaleLatentChannelwise:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"latent": ("LATENT",),
+                     "w1": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
+                     "w2": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
+                     "w3": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
+                     "w4": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
+                     }}
+
+    RETURN_TYPES = ("LATENT",)
+
+    CATEGORY = "latent"
+    FUNCTION = "scale"
+
+    def scale(self, latent, w1, w2, w3, w4):
+        # create a new dictionary to store the scaled latent
+        scaled_latent = {}
+
+        # get the samples tensor from the latent
+        samples = latent["samples"]
+
+        # apply scaling to each channel of the samples tensor using the corresponding weight tensor
+        scaled_samples = samples.clone()
+        scaled_samples[:, 0, :, :] *= w1
+        scaled_samples[:, 1, :, :] *= w2
+        scaled_samples[:, 2, :, :] *= w3
+        scaled_samples[:, 3, :, :] *= w4
+
+        # assign the scaled samples tensor to the "samples" key of the scaled_latent dictionary
+        scaled_latent["samples"] = scaled_samples
+
+        # return the scaled_latent dictionary
+        return (scaled_latent,)
+
+
+
+# Define a constant for MAX_RESOLUTION if needed
+MAX_RESOLUTION = 4096
+
+
+
+# Define the ComfyUI node class for text detection using CRNN model from Torch Hub
+@ETK_image_base
+class TextInImage:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "scale_factor": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "detect_text"
+
+    CATEGORY = "OCR"
+
+    def detect_text(self, image, scale_factor):
+        import torch
+        from torchvision import transforms
+        # the incoming tensor in image is in the format (batch, height, width, channels)
+        # we need to convert it to (batch, channels, height, width)
+
+        image = image.permute(0, 3, 1, 2)
+        new_size=list(image.shape)
+        new_size[2]=int(new_size[2]*scale_factor)
+        new_size[3]=int(new_size[3]*scale_factor)
+        new_size=tuple(new_size[2:])
+
+        rescaled_image = torch.nn.functional.interpolate(image, size=new_size, mode='bilinear')
+        # convert to PIL image
+
+        pil_image = transforms.ToPILImage()(rescaled_image.squeeze(0))
+        # Load CRNN model from Torch Hub
+        # Use a pipeline as a high-level helper
+
+        from transformers import pipeline
+
+        pipe = pipeline("image-to-text", model="microsoft/trocr-large-printed")
+
+        detected_text = pipe.predict(pil_image)[0]["generated_text"]
+
+        return (detected_text,)
+
+
+@ETK_image_base
+class DetectTextLines:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"image": ("IMAGE",),
+                             "threshold": ("FLOAT", {"default": 0.115, "min": 0.01, "max": 1.0, "step": 0.01})}}
+
+    RETURN_TYPES = ("LIST",)
+    RETURN_NAMES = ("list of IMAGE",)
+    FUNCTION = "detect_lines"
+
+    CATEGORY = "OCR"
+
+    def detect_lines(self, image, threshold=0.115):
+        # Convert the image to (b, h, w, c) format for consistency
+        #image = image.permute(0, 2, 3, 1)
+
+        # Convert the image to grayscale
+        grayscale_image = 0.299 * image[..., 0] + 0.587 * image[..., 1] + 0.114 * image[..., 2]
+
+        # Sum the pixel values along the width to get a 1D tensor
+        sum_along_width = torch.sum(grayscale_image, dim=-1)
+
+        # Normalize the sum to get a clearer indication of lines
+        normalized_sum = sum_along_width / torch.max(sum_along_width)
+
+        # Find the y-coordinates where the normalized sum is above the threshold
+        line_coordinates = torch.where(normalized_sum >= threshold)[1]
+
+        # Additional code for converting lines to bounding boxes
+        bounding_boxes = []
+        start_y = None
+        end_y = None
+        sorted_coordinates = torch.sort(line_coordinates).values
+
+        for i, coord in enumerate(sorted_coordinates):
+            if start_y is None:
+                start_y = coord
+            if i < len(sorted_coordinates) - 1:
+                if sorted_coordinates[i + 1] - coord > 1:
+                    end_y = coord
+            else:
+                end_y = coord
+            if end_y is not None:
+                bounding_boxes.append([start_y.item(), end_y.item()])
+                start_y = None
+                end_y = None
+        # at this point the channels are in 2nd dimension
+        # so we need to transpose them to the last dimension
+        # image = image.permute(0, 3, 1, 2)
+
+        # Create image tensors for each bounding box
+        line_images = [image[:, y1:y2+1, :, :] for y1, y2 in bounding_boxes]
+
+        return (line_images,)
 
 
 if __name__ == "__main__":
