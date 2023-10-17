@@ -12,8 +12,8 @@ from typing import List, Tuple, Union
 import cv2
 import torch
 import torchaudio
-from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
-from line_profiler import profile
+# from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
+# from line_profiler import profile
 from torch import dtype
 from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
@@ -77,8 +77,7 @@ class ABCWidgetMetaclass(ABCMeta):
         if (ABC in bases) or (ABCVideoWidget in bases) or ("ABC" in name):
             pass
         else:
-            NODE_CLASS_MAPPINGS[name] = cls
-
+            NODE_CLASS_MAPPINGS["ETK/" + str(name)] = cls
         super().__init__(name, bases, attrs)
 
 
@@ -591,7 +590,7 @@ class GetImageStackStatistics(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetac
         return (out_str, out_hist_image,)
 
 
-@profile
+# @profile
 class VideoFileToImageStack(ABCABCVideoFileToImage, metaclass=ABCWidgetMetaclass):
     """Use cv2 to open a video and save the videos individual frames"""
     RETURN_TYPES = ("IMAGE", "FUNC",)
@@ -1671,7 +1670,7 @@ class WhisperTranscribeToFrameIDXandWords(metaclass=ABCWidgetMetaclass):
             return ("Error",)
 
 
-@profile
+# @profile
 def get_text_frames(word_idx, words_data, x: callable, y: callable, size: (), text_kwargs: dict, style="default"):
     from .image import TextRender as text_render_class
     text_render = text_render_class().render_text
@@ -1729,7 +1728,7 @@ class AddTranscriptionToVideo(metaclass=ABCWidgetMetaclass):
     FUNCTION = "add_transcription_to_video"
     CATEGORY = "transcription"
 
-    @profile
+    # @profile
     def add_transcription_to_video(self, **kwargs):
         import torch
         import gc
@@ -1871,6 +1870,7 @@ class TransformImageStack(metaclass=ABCWidgetMetaclass):
         import torchvision.transforms.functional as TF
 
         x_image = kwargs["ImageStack"]
+        x_image = x_image.detach().clone()
         x = kwargs["x"]
         y = kwargs["y"]
 
