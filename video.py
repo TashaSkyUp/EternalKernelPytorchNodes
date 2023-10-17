@@ -1312,7 +1312,7 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
         else:
             video_fps = frames_length / fps_length_value
 
-        if use_torchvision ==False:
+        if use_torchvision == False:
             writer = imageio.get_writer(video_out_path, fps=float(video_fps))
 
             for frame_data in image_stack:
@@ -1349,11 +1349,6 @@ class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
             audio_tensor = None
             if audio_file is not None:
                 aud_sr = torchaudio.io.StreamReader(audio_file)
-
-
-
-
-
 
             torchvision.io.write_video(filename=video_out_path,
                                        video_array=image_stack,
@@ -1841,3 +1836,67 @@ class AddTranscriptionToVideo(metaclass=ABCWidgetMetaclass):
         preview = y[::30].clone()
 
         return (preview, y,)
+
+
+class TransformImageStack(metaclass=ABCWidgetMetaclass):
+    """
+    Transform a stack of images
+    given x change (in pixels)
+    given y change (in pixels)
+
+
+    """
+
+    # TODO: support sheer,rotate,scale
+    # TODO: support transparancy
+    # TODO: support fill color specification
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        ret = {"required": {"ImageStack": ("IMAGE", {"default": None}),
+                            "x": ("INT", {"default": 0}),
+                            "y": ("INT", {"default": 0}),
+                            },
+               }
+        return ret
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "transform_image_stack"
+
+    def transform_image_stack(self, **kwargs):
+        import os
+        import torch
+        from PIL import Image
+        import torchvision.transforms as transforms
+        import torchvision.transforms.functional as TF
+
+        x_image = kwargs["ImageStack"]
+        x = kwargs["x"]
+        y = kwargs["y"]
+
+        T, H, W, C = x_image.shape  # Assuming x_image has shape (T, H, W, C)
+        out_list = []
+
+        stop_x = x
+        stop_y = y
+        dx_step = stop_x / T - 1
+        dy_step = stop_y / T - 1
+
+        for t in range(T):
+            tx = dx_step * t
+            ty = dy_step * t
+
+            current_frame = x_image[t].detach().clone()
+            # Change from (H, W, C) to (C, H, W)
+            current_frame = current_frame.permute(2, 0, 1)
+
+            transformed_frame = TF.affine(current_frame, angle=0, translate=(tx, ty), scale=1,
+                                          shear=[0, 0]).detach().clone()
+
+            # Convert back to (H, W, C)
+            transformed_frame = transformed_frame.permute(1, 2, 0)
+
+            # Store in the list
+            x_image[t] = transformed_frame
+
+        return (x_image.detach().clone(),)
