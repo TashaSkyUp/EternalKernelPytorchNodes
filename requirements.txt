@@ -7,3 +7,4 @@ GitPython
 librosa
 moviepy
 openai-whisper
+addict
