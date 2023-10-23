@@ -1853,8 +1853,8 @@ class TransformImageStack(metaclass=ABCWidgetMetaclass):
     @classmethod
     def INPUT_TYPES(cls):
         ret = {"required": {"ImageStack": ("IMAGE", {"default": None}),
-                            "x": ("INT", {"default": 0}),
-                            "y": ("INT", {"default": 0}),
+                            "pan x": ("INT", {"default": 0, "min": -2048}),
+                            "pan y": ("INT", {"default": 0, "min": -2048}),
                             },
                }
         return ret
@@ -1871,18 +1871,76 @@ class TransformImageStack(metaclass=ABCWidgetMetaclass):
 
         x_image = kwargs["ImageStack"]
         x_image = x_image.detach().clone()
-        x = kwargs["x"]
-        y = kwargs["y"]
+        x = kwargs["pan x"]
+        y = kwargs["pan y"]
 
-        T, H, W, C = x_image.shape  # Assuming x_image has shape (T, H, W, C)
+        time_index, H, W, C = x_image.shape  # Assuming x_image has shape (time_index, H, W, C)
         out_list = []
 
         stop_x = x
         stop_y = y
-        dx_step = stop_x / T - 1
-        dy_step = stop_y / T - 1
+        dx_step = stop_x / time_index - 1
+        dy_step = stop_y / time_index - 1
 
-        for t in range(T):
+        for t in range(time_index):
+            tx = dx_step * t
+            ty = dy_step * t
+
+            current_frame = x_image[t].detach().clone()
+            # Change from (H, W, C) to (C, H, W)
+            current_frame = current_frame.permute(2, 0, 1)
+
+            transformed_frame = TF.affine(current_frame, angle=0, translate=(tx, ty), scale=1,
+                                          shear=[0, 0]).detach().clone()
+
+            # Convert back to (H, W, C)
+            transformed_frame = transformed_frame.permute(1, 2, 0)
+
+            # Store in the list
+            x_image[t] = transformed_frame
+
+        return (x_image.detach().clone(),)
+
+class PanByStep(metaclass=ABCWidgetMetaclass):
+    """
+    Transform a stack of images
+    given x change (in pixels)
+    given y change (in pixels)
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        ret = {"required": {"ImageStack": ("IMAGE", {"default": None}),
+                            "pan x": ("INT", {"default": 0, "min": -2048}),
+                            "pan y": ("INT", {"default": 0, "min": -2048}),
+                            },
+               }
+        return ret
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "pan_by_step"
+
+    def pan_by_step(self, **kwargs):
+        import os
+        import torch
+        from PIL import Image
+        import torchvision.transforms as transforms
+        import torchvision.transforms.functional as TF
+
+        x_image = kwargs["ImageStack"]
+        x_image = x_image.detach().clone()
+        x = kwargs["pan x"]
+        y = kwargs["pan y"]
+
+        time_index, H, W, C = x_image.shape  # Assuming x_image has shape (time_index, H, W, C)
+        out_list = []
+
+        stop_x = x
+        stop_y = y
+        dx_step = stop_x / time_index - 1
+        dy_step = stop_y / time_index - 1
+
+        for t in range(time_index):
             tx = dx_step * t
             ty = dy_step * t
 
