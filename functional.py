@@ -22,6 +22,23 @@ def ETK_functional_base(cls):
     NODE_CLASS_MAPPINGS[cls.__name__] = cls
     return cls
 
+def new_exec(c, g, l):
+    global old_exec
+    import os
+    # if GDE_SECURE_MODE is set to NO_EXEC then we will not execute any code
+    # this is a security feature to prevent malicious code from being executed
+    # this is set in the GDE settings
+    GDE_SECURE_MODE = os.environ.get("GDE_SECURE_MODE", None)
+    if GDE_SECURE_MODE == "NO_EXEC":
+        raise Exception("GDE_SECURE_MODE is set to NO_EXEC, not executing code")
+
+    old_exec(c, g, l)
+
+    return locals
+
+old_exec = exec
+exec = new_exec
+
 
 @ETK_functional_base
 class FuncBase:
