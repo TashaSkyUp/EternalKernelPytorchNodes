@@ -1952,11 +1952,185 @@ class ScaleLatentChannelwise:
         return (scaled_latent,)
 
 
+@ETK_image_base
+class ImageStackAndMatch:
+    """
+    maintain the aspect ratio of multiple images by adding padding or by cropping
+    but stack the images into a single torch tensor
+    takes 4 image stacks as input
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = {"required": {
+            "image1": ("IMAGE",),
+            "image2": ("IMAGE",),
+            "scale_type": (["SCL_UP", "SCL_DOWN"], {"default": "SCL_UP"}),
+            "scale_interp": (
+                ["nearest-exact",
+                 "bilinear",
+                 "bicubic",
+                 "area"], {"default": "area"}),
+            "pad_or_crop": (["PAD", "CROP"], {"default": "PAD"}),
+            "pad_color": ("STRING", {"default": "#000000"}),
+        }}
+
+        req["optional"] = {
+            "image3": ("IMAGE",),
+            "image4": ("IMAGE",),
+        }
+
+        return req
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+
+    CATEGORY = "ETK/func"
+    FUNCTION = "func"
+
+    def scale_up(self, image, height, width, scale_interp):
+        """
+        This function scales up the image to the given height and width using the given interpolation method.
+        without converting to PIL
+        input tensor images are (B, H, W, C)
+        """
+        import torch.nn.functional as F
+        channels = image.shape[-1]
+
+        # make sure the diminsionalities are correct
+        if image.dim() != 3 and image.shape[0]==1:
+            print(image.shape)
+            #image = image.squeeze(0)
+            print(image.shape)
+            image = image.permute(2, 0, 1)
+            print(image.shape)
+            image = F.interpolate(image, size=(height, width), mode=scale_interp)
+            print(image.shape)
+            image = image.permute(1, 2, 0)
+            print(image.shape)
+            return image
+
+        else:
+            # handle the entire stack one at a time
+            for i in range(image.shape[0]):
+                # shape will now be (H, W, C)
+                t_img = image[i]
+                t_img = t_img.permute(2, 0, 1)
+                t_img = self.scale_up(t_img[i], height, width, scale_interp)
+                t_img = t_img.permute(1, 2, 0)
+                image[i] = t_img
+            return image
+
+
+
+
+    def func(self, **kwargs):
+        import torchvision.transforms.functional as TF
+
+        # images are torch tensors (B, H, W, C)
+        image1 = kwargs.get("image1", None)
+        image2 = kwargs.get("image2", None)
+        image3 = kwargs.get("image3", None)
+        image4 = kwargs.get("image4", None)
+        scale_interp = kwargs.get("scale_interp", None)
+        scale_type = kwargs.get("scale_type", None)
+        pad_or_crop = kwargs.get("pad_or_crop", None)
+        pad_color = kwargs.get("pad_color", None)
+
+        # find the maximum height and width of the images given that not all images != None
+        valid_images = [image for image in [image1, image2, image3, image4] if image is not None]
+        max_height = max([image.shape[1] for image in valid_images])
+        max_width =  max([image.shape[2] for image in valid_images])
+
+
+        # create a list of scaled images
+
+        # if scale_type is SCL_UP, scale the images up to the maximum height and width
+        if scale_type == "SCL_UP" and pad_or_crop == "PAD":
+            for i in range(len(valid_images)):
+                # plan is to:
+                # 1. abide by the images aspect ratio by
+                #   1a. finding the scale factor
+                #   1b. scaling the image
+                # 2. pad the image to the maximum height and width
+                #   2a. find the padding required
+                #   2b. pad the image
+
+                # get the height and width of the image
+                height = valid_images[i].shape[1]
+                width = valid_images[i].shape[2]
+
+                # calculate the scale factor by
+                # 1. finding the aspect ratio
+                # 2. finding the scale factor
+                aspect_ratio = width / height
+                if aspect_ratio > 1:
+                    scale_factor = max_width / width
+                else:
+                    scale_factor = max_height / height
+
+                # find the correct width and height
+                width = int(width * scale_factor)
+                height = int(height * scale_factor)
+
+                # scale the image
+                valid_images[i] = self.scale_up(valid_images[i], height, width, scale_interp)
+
+                # find the padding required
+                pad_height = max_height - height
+                pad_width = max_width - width
+
+                # pad the image so that the image content is in the middle
+                valid_images[i] = TF.pad(valid_images[i], [(pad_width // 2), (pad_height // 2)], pad_color)
+
+        elif scale_type == "SCL_UP" and pad_or_crop == "CROP":
+            for i in range(len(valid_images)):
+                # plan is to:
+                # 1. abide by the images aspect ratio by
+                #   1a. finding the scale factor
+                #   1b. scaling the image
+                # 2. crop the image to the maximum height and width
+                #   2a. find the crop required
+                #   2b. crop the image
+
+                # get the height and width of the image
+                height = valid_images[i].shape[1]
+                width = valid_images[i].shape[2]
+
+                # calculate the scale factor by
+                # 1. finding the aspect ratio
+                # 2. finding the scale factor
+                aspect_ratio = width / height
+                if aspect_ratio > 1:
+                    scale_factor = max_width / width
+                else:
+                    scale_factor = max_height / height
+
+                # find the correct width and height
+                width = int(width * scale_factor)
+                height = int(height * scale_factor)
+
+                # scale the image
+                valid_images[i] = self.scale_up(valid_images[i], height, width, scale_interp)
+
+                # find the crop required
+                crop_height = height - max_height
+                crop_width = width - max_width
+
+                # crop the image so that the image content is in the middle
+                valid_images[i] = TF.crop(valid_images[i], (crop_width // 2), (crop_height // 2), max_width, max_height)
+
+        else:
+            raise NotImplementedError
+
+        # resultant image stack should be (B, H, W, C)
+        image = torch.stack(valid_images, dim=0)
+
+        return (image,)
+
 
 # Define a constant for MAX_RESOLUTION if needed
 MAX_RESOLUTION = 4096
-
-
 
 # Define the ComfyUI node class for text detection using CRNN model from Torch Hub
 @ETK_image_base
@@ -2019,7 +2193,7 @@ class DetectTextLines:
 
     def detect_lines(self, image, threshold=0.115):
         # Convert the image to (b, h, w, c) format for consistency
-        #image = image.permute(0, 2, 3, 1)
+        # image = image.permute(0, 2, 3, 1)
 
         # Convert the image to grayscale
         grayscale_image = 0.299 * image[..., 0] + 0.587 * image[..., 1] + 0.114 * image[..., 2]
@@ -2056,7 +2230,7 @@ class DetectTextLines:
         # image = image.permute(0, 3, 1, 2)
 
         # Create image tensors for each bounding box
-        line_images = [image[:, y1:y2+1, :, :] for y1, y2 in bounding_boxes]
+        line_images = [image[:, y1:y2 + 1, :, :] for y1, y2 in bounding_boxes]
 
         return (line_images,)
 
