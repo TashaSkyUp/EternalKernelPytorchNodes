@@ -57,10 +57,9 @@ class CloneRepoNode:
 
     RETURN_TYPES = ("STRING", "STRING", "LIST",)
     RETURN_NAMES = ("path_passthrough", "file_structure", "file_list",)
-    FUNCTION = 'clone_repo'
     CATEGORY = 'ETK/git'
 
-    def clone_repo(self, **kwargs):
+    def func(self, **kwargs):
         kwargs = copy.deepcopy(kwargs)
         repo_url = kwargs.get('repo_url')
         path = kwargs.get('path')
@@ -69,7 +68,7 @@ class CloneRepoNode:
 
         # return the file structure of the repo
         ld = os.listdir(path)
-        return ("".join(ld), ld,)
+        return (path,"".join(ld), ld,)
 
 
 @ETK_git_base
