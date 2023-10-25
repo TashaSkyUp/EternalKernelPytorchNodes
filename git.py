@@ -66,46 +66,33 @@ class CloneRepoNode:
             "required": {
                 "repo_url": ("STRING", {"multiline": False, "default": ""}),
                 "path": ("STRING", {"multiline": False, "default": ""}),
-                "token": ("STRING", {"multiline": False, "default": ""}),
+                # "path_to_key": ("STRING", {"multiline": False, "default": ""}),
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "LIST",)
-    RETURN_NAMES = ("path_passthrough", "file_structure", "file_list",)
+    RETURN_TYPES = ("STRING", "STRING", "LIST", "STRING",)
+    RETURN_NAMES = ("path_passthrough", "file_structure", "file_list", "STD_OUT+ERR",)
     CATEGORY = 'ETK/git'
 
     def func(self, **kwargs):
         kwargs = copy.deepcopy(kwargs)
         repo_url = kwargs.get('repo_url')
         path = kwargs.get('path')
-        token = kwargs.get('token')
 
-        # clone a repo into a new directory, using the custom ssh command
-        # token actually is the path to the private key
-        # so we already know where the private key is
-        # we just need to tell git to use it
+        # token = kwargs.get('token')
+        # lets just do it via  calling the terminal
+        # working = f"GIT_SSH_COMMAND='ssh -i {path_to_key}' git clone https://github.com/story-squad/GDE_Graph_IO.git {path}"
+        working = f"git clone {repo_url} {path}"
+        import os
+        import subprocess
 
-        cmd = 'ssh -i {} -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'.format(token)
-        repo = Repo.clone_from(repo_url, path, env={'GIT_SSH_COMMAND': cmd})
+        # execute the command and retrieve the results
+        process = subprocess.Popen(working, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        out, err = process.communicate()
 
-        # this should not work but it does.
-        Repo.clone_from(repo_url, path, env={'GIT_ASKPASS': 'echo', 'GIT_USERNAME': token})
-
-        # linux / not windows ?
-        # this actually worked on linux
-        # GIT_SSH_COMMAND="ssh -i /root/.ssh/git.private.key" clone https://github.com/gitpython-developers/GitPython.git
-        #
-
-        # use the key at /root/.ssh/git.private.key
-        # below needs tested
-        ssh_cmd = 'ssh -i /root/.ssh/git.private.key -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
-        repo = Repo(path)
-        with repo.git.custom_environment(GIT_SSH_COMMAND=ssh_cmd):
-            repo.clone_from(repo_url, path)
-
-        # return the file structure of the repo
         ld = os.listdir(path)
-        return (path, "".join(ld), ld,)
+
+        return (path, "\n".join(ld), ld, out.decode("utf-8") + err.decode("utf-8"),)
 
 
 @ETK_git_base
