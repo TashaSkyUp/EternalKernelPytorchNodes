@@ -2,9 +2,24 @@ from git import Repo, InvalidGitRepositoryError
 import os
 import copy
 import re
+from custom_nodes.EternalKernelLiteGraphNodes.shared import ETK_PATH
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
+
+
+def check_for_js_extension():
+    # here we check to see that the js extension is installed at ../../web/extensions/etk/ui_modifications.js
+    # if it is not, we will copy it there from the ETK_PATH
+    # check if the file exists
+    import shutil
+    check_full_path = os.path.normpath(os.path.join(ETK_PATH, "../../web/extensions/etk/ui_modifications.js"))
+    if not os.path.exists(check_full_path):
+        # copy the file
+        shutil.copy(os.path.join(ETK_PATH, "ui_modifications.js"), check_full_path)
+
+
+check_for_js_extension()
 
 
 def ETK_git_base(cls):
@@ -64,11 +79,33 @@ class CloneRepoNode:
         repo_url = kwargs.get('repo_url')
         path = kwargs.get('path')
         token = kwargs.get('token')
+
+        # clone a repo into a new directory, using the custom ssh command
+        # token actually is the path to the private key
+        # so we already know where the private key is
+        # we just need to tell git to use it
+
+        cmd = 'ssh -i {} -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'.format(token)
+        repo = Repo.clone_from(repo_url, path, env={'GIT_SSH_COMMAND': cmd})
+
+        # this should not work but it does.
         Repo.clone_from(repo_url, path, env={'GIT_ASKPASS': 'echo', 'GIT_USERNAME': token})
+
+        # linux / not windows ?
+        # this actually worked on linux
+        # GIT_SSH_COMMAND="ssh -i /root/.ssh/git.private.key" clone https://github.com/gitpython-developers/GitPython.git
+        #
+
+        # use the key at /root/.ssh/git.private.key
+        # below needs tested
+        ssh_cmd = 'ssh -i /root/.ssh/git.private.key -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
+        repo = Repo(path)
+        with repo.git.custom_environment(GIT_SSH_COMMAND=ssh_cmd):
+            repo.clone_from(repo_url, path)
 
         # return the file structure of the repo
         ld = os.listdir(path)
-        return (path,"".join(ld), ld,)
+        return (path, "".join(ld), ld,)
 
 
 @ETK_git_base
