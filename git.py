@@ -2,21 +2,38 @@ from git import Repo, InvalidGitRepositoryError
 import os
 import copy
 import re
-from custom_nodes.EternalKernelLiteGraphNodes.shared import ETK_PATH
+from custom_nodes.EternalKernelLiteGraphNodes.shared import ETK_PATH, GDE_PATH
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 def check_for_js_extension():
-    # here we check to see that the js extension is installed at ../../web/extensions/etk/ui_modifications.js
+    # here we check to see that the js extension is installed at {GDE_PATH}/web/extensions/etk/ui_modifications.js
     # if it is not, we will copy it there from the ETK_PATH
     # check if the file exists
+
     import shutil
-    check_full_path = os.path.normpath(os.path.join(ETK_PATH, "../../web/extensions/etk/ui_modifications.js"))
-    if not os.path.exists(check_full_path):
-        # copy the file
-        shutil.copy(os.path.join(ETK_PATH, "ui_modifications.js"), check_full_path)
+    for fn in ["ui_modifications.js", "ui_helpers.js"]:
+        check_full_path = os.path.normpath(os.path.join(ETK_PATH, f"{GDE_PATH}/web/extensions/etk/{fn}"))
+        # now lets check the modified date of the file
+
+        if os.path.exists(check_full_path):
+            if os.path.getmtime(check_full_path) < os.path.getmtime(os.path.join(ETK_PATH, fn)):
+                # check_target_newer = True
+                should_copy_this_file = True
+            else:
+                # check_target_newer = False
+                should_copy_this_file = False
+
+        else:
+            should_copy_this_file = True
+
+        if should_copy_this_file:
+            print(f"Copying {fn} to {check_full_path}")
+            shutil.copy(os.path.join(ETK_PATH, fn), check_full_path)
+        else:
+            print(f"Skipping {fn} as it is already up to date")
 
 
 check_for_js_extension()
