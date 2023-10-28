@@ -1920,10 +1920,10 @@ class ScaleLatentChannelwise:
     def INPUT_TYPES(s):
         return {"required":
                     {"latent": ("LATENT",),
-                     "w1": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
-                     "w2": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
-                     "w3": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
-                     "w4": ("FLOAT", {"min": -2, "max": 2, "default": 1,"step":0.05}),
+                     "w1": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+                     "w2": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+                     "w3": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+                     "w4": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
                      }}
 
     RETURN_TYPES = ("LATENT",)
@@ -2040,8 +2040,7 @@ class ImageStackAndMatch:
         # find the maximum height and width of the images given that not all images != None
         valid_images = [image for image in [image1, image2, image3, image4] if image is not None]
         max_height = max([image.shape[1] for image in valid_images])
-        max_width =  max([image.shape[2] for image in valid_images])
-
+        max_width = max([image.shape[2] for image in valid_images])
 
         # create a list of scaled images
 
@@ -2081,7 +2080,12 @@ class ImageStackAndMatch:
                 pad_width = max_width - width
 
                 # pad the image so that the image content is in the middle
-                valid_images[i] = TF.pad(valid_images[i], [(pad_width // 2), (pad_height // 2)], pad_color)
+                # convert the string of format like "#000000" to a tuple of (0, 0, 0)
+                # pad_color = tuple(int(pad_color[i:i + 2], 16) for i in (1, 3, 5))
+                valid_images[i] = TF.pad(valid_images[i],
+                                         [(pad_width // 2), (pad_height // 2)],
+                                         fill=0
+                                         )
 
         elif scale_type == "SCL_UP" and pad_or_crop == "CROP":
             for i in range(len(valid_images)):
@@ -2132,6 +2136,7 @@ class ImageStackAndMatch:
 # Define a constant for MAX_RESOLUTION if needed
 MAX_RESOLUTION = 4096
 
+
 # Define the ComfyUI node class for text detection using CRNN model from Torch Hub
 @ETK_image_base
 class TextInImage:
@@ -2157,10 +2162,10 @@ class TextInImage:
         # we need to convert it to (batch, channels, height, width)
 
         image = image.permute(0, 3, 1, 2)
-        new_size=list(image.shape)
-        new_size[2]=int(new_size[2]*scale_factor)
-        new_size[3]=int(new_size[3]*scale_factor)
-        new_size=tuple(new_size[2:])
+        new_size = list(image.shape)
+        new_size[2] = int(new_size[2] * scale_factor)
+        new_size[3] = int(new_size[3] * scale_factor)
+        new_size = tuple(new_size[2:])
 
         rescaled_image = torch.nn.functional.interpolate(image, size=new_size, mode='bilinear')
         # convert to PIL image
