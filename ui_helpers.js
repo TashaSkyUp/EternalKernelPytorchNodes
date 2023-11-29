@@ -1,15 +1,16 @@
 import {app} from "../../../scripts/app.js";
 import {api} from "../../../scripts/api.js";
 
-export function setupButtons(menu, app, api) {
+export function setupButtons(gdeState, app, api) {
     // Save To Git Button
+    const menu = document.querySelector(".comfy-menu");
     const saveButton = document.createElement("button");
-    saveButton.textContent = "Save To Git";
+    saveButton.textContent = "Save To Cloud";
     saveButton.onclick = async () => {
         try {
             const json = JSON.stringify(app.graph.serialize(), null, 2);
-            const userNameValue = menu.querySelector("#branch-name-field").value;
-            const dropDownSelected = menu.querySelector("#graph-name-field").value;
+            const userNameValue = gdeState.user;
+            const graphSelected = gdeState.graph;
 
             await api.fetchApi("/gde/git/save", {
                 method: "POST",
@@ -18,7 +19,7 @@ export function setupButtons(menu, app, api) {
                 },
                 body: JSON.stringify({
                     data: json,
-                    file_name: dropDownSelected,
+                    file_name: graphSelected,
                     user_name: userNameValue
                 }),
             });
@@ -30,9 +31,11 @@ export function setupButtons(menu, app, api) {
 
     // Load From Git Button
     const loadButton = document.createElement("button");
-    loadButton.textContent = "Load From Git";
+    loadButton.textContent = "Load From Cloud";
     loadButton.onclick = async () => {
         try {
+            const userNameValue = gdeState.user;
+            const graphSelected = gdeState.graph;
             const response = await api.fetchApi("/gde/git/load", {
                 // needs user_name file_name
                 method: "POST",
@@ -40,8 +43,8 @@ export function setupButtons(menu, app, api) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                        user_name: menu.querySelector("#branch-name-field").value,
-                        file_name: menu.querySelector("#graph-name-field").value
+                        user_name: userNameValue,
+                        file_name: graphSelected
                     }
                 ),
 
@@ -56,9 +59,10 @@ export function setupButtons(menu, app, api) {
 }
 
 
-export function setupModal() {
+export function setupModal(gdeState) {
     // Modal
     const modal = document.createElement("div");
+    modal.id = "graph-name-modal";
     modal.style.display = "none"; // Initially hidden
     modal.style.position = "fixed";
     modal.style.top = "50%";
@@ -80,7 +84,10 @@ export function setupModal() {
     const submitButton = document.createElement("button");
     submitButton.textContent = "Submit";
     let targetDropdownId = ''; // This will store the ID of the dropdown we're targeting
-    submitButton.onclick = () => {
+
+    modal.submit = () => {
+        // this is the function that will be called when the submit button is clicked
+        // it will add the new option to the dropdown and select it
         const dropdown = document.querySelector(`#${targetDropdownId}`);
         const newOption = document.createElement("option");
         newOption.value = modalInput.value;
@@ -89,6 +96,10 @@ export function setupModal() {
         dropdown.value = modalInput.value;
         console.log("Submitted value:", modalInput.value);
         modal.style.display = "none"; // Hide the modal
+        return modalInput.value;
+    }
+    submitButton.onclick = () => {
+        modal.submit()
     };
     modal.append(submitButton);
 
@@ -99,13 +110,37 @@ export function setupModal() {
     };
 }
 
+HTMLSelectElement.prototype.clearDropDown = function (placeHolder = "") {
+    // remove everything
+    while (this.options.length > 0) {
+        this.remove(0);
+    }
+    // only add if there is a placeholder
+    if (placeHolder != "") {
+        //add select+type
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = placeHolder
+        this.append(defaultOption);
 
-export function setupDropdown(menu, api, placeholder, apiEndpoint, dropdownId, user = null, graph_name = null, onCreateNew = null) {
+        // Add "Create New" option
+        const createNewOption = document.createElement("option");
+        createNewOption.value = "create_new";
+        createNewOption.textContent = "Create New";
+        this.append(createNewOption);
+    }
+
+};
+
+
+export function setupDropdown(menu, api, placeholder, apiEndpoint, dropdownId,
+                              user = null, onCreateNew = null,
+                              onChanged = null) {
     let dropdown = document.getElementById(dropdownId);
 
     // If dropdown already exists, clear its options first
     if (dropdown) {
-        dropdown.innerHTML = '';
+        dropdown.clearDropDown(placeholder)
     } else {
         // Create new dropdown if it doesn't exist
         dropdown = document.createElement("select");
@@ -118,55 +153,49 @@ export function setupDropdown(menu, api, placeholder, apiEndpoint, dropdownId, u
 
         dropdown.id = dropdownId;
         //use comfy-list style
-
+        dropdown.clearDropDown(placeholder)
         menu.append(dropdown);
+
+        // Add event listener to the dropdown
+        dropdown.addEventListener("change", (event) => {
+            // Check if "Create New" option was selected
+            if (event.target.value === "create_new" && onCreateNew) {
+                onCreateNew(event, dropdown);
+            }
+            if (onChanged) {
+                onChanged(event, dropdown);
+            }
+
+        }
+        );
     }
 
-    // Add default option
-    const defaultOption = document.createElement("option");
-    defaultOption.value = "";
-    defaultOption.textContent = placeholder;
-    dropdown.append(defaultOption);
 
-    // Add "Create New" option
-    const createNewOption = document.createElement("option");
-    createNewOption.value = "create_new";
-    createNewOption.textContent = "Create New";
-    dropdown.append(createNewOption);
-
-    dropdown.addEventListener("change", (event) => {
-        // Check if "Create New" option was selected
-        if (event.target.value === "create_new" && onCreateNew) {
-            onCreateNew(event, dropdown);
-        }
-
-        // Check if branch dropdown is the one being changed
-        if (dropdownId === 'branch-name-field') {
-            while (dropdown.options.length > 2) {
-                dropdown.remove(2);
-            }
-            setTimeout(async () => {
-                await someFunction(dropdownId, api, apiEndpoint, placeholder, user, graph_name)
-            })
-        }
-    });
+    // dropdown.addEventListener("change", (event) => {
+    //     // Check if "Create New" option was selected
+    //     if (event.target.value === "create_new" && onCreateNew) {
+    //         onCreateNew(event, dropdown);
+    //     }
+    //
+    // });
 
     setTimeout(async () => {
-        await someFunction(dropdownId, api, apiEndpoint, placeholder, user, graph_name)
-    })
+        dropdown.clearDropDown(placeholder)
+        await someFunction(dropdownId, api, apiEndpoint, placeholder, user)
+    }, 50)
+    return dropdown;
 }
 
-export async function someFunction(dropdownId, api, apiEndpoint, placeholder, user = null, graph_name = null) {
+export async function someFunction(dropdownId, api, apiEndpoint, placeholder, user = null) {
+    // this is the function that will be called to fetch the options for the dropdown
     try {
         const dropdown = document.getElementById(dropdownId);
         dropdown.disabled = true;  // Disable the file dropdown
-
+        const clientId = api.socket.url.split("=")[1]
         const queryParams = {
-            user: user || ""
+            user: user || "",
+            client_id: clientId
         };
-        if (graph_name) {
-            queryParams.graph_name = graph_name;
-        }
 
         const response = await api.fetchApi(apiEndpoint, {
             method: "POST",
@@ -177,6 +206,10 @@ export async function someFunction(dropdownId, api, apiEndpoint, placeholder, us
         });
         const optionsData = await response.json();
         optionsData.forEach(optionItem => {
+            // if the option already exists, don't add it again
+            if (dropdown.querySelector(`option[value="${optionItem.value}"]`)) {
+                return;
+            }
             const optionElement = document.createElement("option");
             optionElement.value = optionItem.value;
             optionElement.textContent = optionItem.label;
