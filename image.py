@@ -260,7 +260,7 @@ class TinyTxtToImg:
             TinyTxtToImg.share_mdl_ckpt_name = None
 
         if TinyTxtToImg.share_mdl is None:
-            self.mdl, self.clp, self.vae, self.vision = \
+            self.mdl, self.clp, self.vae = \
                 CheckpointLoaderSimple.load_checkpoint(None,
                                                        ckpt_name=ckpt_name
                                                        )
@@ -274,7 +274,7 @@ class TinyTxtToImg:
         else:
             # check if the checkpoint is the same
             if TinyTxtToImg.share_mdl_ckpt_name != ckpt_name:
-                self.mdl, self.clp, self.vae, self.vision = \
+                self.mdl, self.clp, self.vae = \
                     CheckpointLoaderSimple.load_checkpoint(None,
                                                            ckpt_name=ckpt_name
                                                            )
@@ -1954,183 +1954,94 @@ class ScaleLatentChannelwise:
 
 @ETK_image_base
 class ImageStackAndMatch:
+    # Define properties of the node
     """
-    maintain the aspect ratio of multiple images by adding padding or by cropping
-    but stack the images into a single torch tensor
-    takes 4 image stacks as input
+    Maintain the aspect ratio of multiple images by adding padding or by cropping,
+    then stack the images into a single torch tensor.
+    Takes up to 4 image stacks as input.
     """
 
     @classmethod
     def INPUT_TYPES(cls):
-        req = {"required": {
-            "image1": ("IMAGE",),
-            "image2": ("IMAGE",),
-            "scale_type": (["SCL_UP", "SCL_DOWN"], {"default": "SCL_UP"}),
-            "scale_interp": (
-                ["nearest-exact",
-                 "bilinear",
-                 "bicubic",
-                 "area"], {"default": "area"}),
-            "pad_or_crop": (["PAD", "CROP"], {"default": "PAD"}),
-            "pad_color": ("STRING", {"default": "#000000"}),
-        }}
-
-        req["optional"] = {
-            "image3": ("IMAGE",),
-            "image4": ("IMAGE",),
+        return {
+            "required": {
+                "image1": ("IMAGE",),
+                "image2": ("IMAGE",),
+                "scale_interp": (
+                    ["nearest", "bilinear", "bicubic", "area"], {"default": "area"}),
+                "pad_color": ("STRING", {"default": "#000000"}),
+            },
+            "optional": {
+                "image3": ("IMAGE",),
+                "image4": ("IMAGE",),
+                "scale_type": (["SCL_UP", "SCL_DOWN"], {"default": "SCL_UP"}),
+                "pad_or_crop": (["PAD", "CROP"], {"default": "PAD"}),
+            }
         }
 
-        return req
-
     RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
-
     CATEGORY = "ETK/func"
-    FUNCTION = "func"
+    FUNCTION = "process_images"
 
-    def scale_up(self, image, height, width, scale_interp):
-        """
-        This function scales up the image to the given height and width using the given interpolation method.
-        without converting to PIL
-        input tensor images are (B, H, W, C)
-        """
+    def hex_to_rgb(self, hex_color):
+        hex_color = hex_color.lstrip("#")
+        return tuple(int(hex_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+    def pad_to_max_size(self, image, max_height, max_width, pad_value):
         import torch.nn.functional as F
-        channels = image.shape[-1]
 
-        # make sure the diminsionalities are correct
-        if image.dim() != 3 and image.shape[0]==1:
-            print(image.shape)
-            #image = image.squeeze(0)
-            print(image.shape)
-            image = image.permute(2, 0, 1)
-            print(image.shape)
-            image = F.interpolate(image, size=(height, width), mode=scale_interp)
-            print(image.shape)
-            image = image.permute(1, 2, 0)
-            print(image.shape)
-            return image
+        _, h, w, c = image.shape
+        padding_left = (max_width - w) // 2
+        padding_right = max_width - w - padding_left
+        padding_top = (max_height - h) // 2
+        padding_bottom = max_height - h - padding_top
+        padding = (padding_left, padding_right, padding_top, padding_bottom)
+        return F.pad(image, padding, value=pad_value)
 
+    def resize_image(self, image, target_height, target_width, scale_interp):
+        import torch.nn.functional as F
+
+        _, h, w, _ = image.shape
+        scale_factor_height = target_height / h
+        scale_factor_width = target_width / w
+        if scale_interp == 'area':
+            scale_factor_min = min(scale_factor_height, scale_factor_width)
+            image = F.interpolate(image, scale_factor=scale_factor_min, mode='area', recompute_scale_factor=True,
+                                  align_corners=None)
         else:
-            # handle the entire stack one at a time
-            for i in range(image.shape[0]):
-                # shape will now be (H, W, C)
-                t_img = image[i]
-                t_img = t_img.permute(2, 0, 1)
-                t_img = self.scale_up(t_img[i], height, width, scale_interp)
-                t_img = t_img.permute(1, 2, 0)
-                image[i] = t_img
-            return image
+            image = F.interpolate(image, size=(target_height, target_width), mode=scale_interp, align_corners=True)
+        return image
 
+    def process_image(self, image, max_height, max_width, scale_type, pad_color, scale_interp, pad_or_crop):
+        _, h, w, _ = image.shape
+        pad_value = self.hex_to_rgb(pad_color)
 
-
-
-    def func(self, **kwargs):
-        import torchvision.transforms.functional as TF
-
-        # images are torch tensors (B, H, W, C)
-        image1 = kwargs.get("image1", None)
-        image2 = kwargs.get("image2", None)
-        image3 = kwargs.get("image3", None)
-        image4 = kwargs.get("image4", None)
-        scale_interp = kwargs.get("scale_interp", None)
-        scale_type = kwargs.get("scale_type", None)
-        pad_or_crop = kwargs.get("pad_or_crop", None)
-        pad_color = kwargs.get("pad_color", None)
-
-        # find the maximum height and width of the images given that not all images != None
-        valid_images = [image for image in [image1, image2, image3, image4] if image is not None]
-        max_height = max([image.shape[1] for image in valid_images])
-        max_width = max([image.shape[2] for image in valid_images])
-
-        # create a list of scaled images
-
-        # if scale_type is SCL_UP, scale the images up to the maximum height and width
-        if scale_type == "SCL_UP" and pad_or_crop == "PAD":
-            for i in range(len(valid_images)):
-                # plan is to:
-                # 1. abide by the images aspect ratio by
-                #   1a. finding the scale factor
-                #   1b. scaling the image
-                # 2. pad the image to the maximum height and width
-                #   2a. find the padding required
-                #   2b. pad the image
-
-                # get the height and width of the image
-                height = valid_images[i].shape[1]
-                width = valid_images[i].shape[2]
-
-                # calculate the scale factor by
-                # 1. finding the aspect ratio
-                # 2. finding the scale factor
-                aspect_ratio = width / height
-                if aspect_ratio > 1:
-                    scale_factor = max_width / width
-                else:
-                    scale_factor = max_height / height
-
-                # find the correct width and height
-                width = int(width * scale_factor)
-                height = int(height * scale_factor)
-
-                # scale the image
-                valid_images[i] = self.scale_up(valid_images[i], height, width, scale_interp)
-
-                # find the padding required
-                pad_height = max_height - height
-                pad_width = max_width - width
-
-                # pad the image so that the image content is in the middle
-                # convert the string of format like "#000000" to a tuple of (0, 0, 0)
-                # pad_color = tuple(int(pad_color[i:i + 2], 16) for i in (1, 3, 5))
-                valid_images[i] = TF.pad(valid_images[i],
-                                         [(pad_width // 2), (pad_height // 2)],
-                                         fill=0
-                                         )
-
-        elif scale_type == "SCL_UP" and pad_or_crop == "CROP":
-            for i in range(len(valid_images)):
-                # plan is to:
-                # 1. abide by the images aspect ratio by
-                #   1a. finding the scale factor
-                #   1b. scaling the image
-                # 2. crop the image to the maximum height and width
-                #   2a. find the crop required
-                #   2b. crop the image
-
-                # get the height and width of the image
-                height = valid_images[i].shape[1]
-                width = valid_images[i].shape[2]
-
-                # calculate the scale factor by
-                # 1. finding the aspect ratio
-                # 2. finding the scale factor
-                aspect_ratio = width / height
-                if aspect_ratio > 1:
-                    scale_factor = max_width / width
-                else:
-                    scale_factor = max_height / height
-
-                # find the correct width and height
-                width = int(width * scale_factor)
-                height = int(height * scale_factor)
-
-                # scale the image
-                valid_images[i] = self.scale_up(valid_images[i], height, width, scale_interp)
-
-                # find the crop required
-                crop_height = height - max_height
-                crop_width = width - max_width
-
-                # crop the image so that the image content is in the middle
-                valid_images[i] = TF.crop(valid_images[i], (crop_width // 2), (crop_height // 2), max_width, max_height)
-
+        if scale_type == 'SCL_UP':
+            target_height = max_height if h < max_height else h
+            target_width = max_width if w < max_width else w
+            image = self.resize_image(image, target_height, target_width, scale_interp)
+            if pad_or_crop == 'PAD':
+                image = self.pad_to_max_size(image, max_height, max_width, pad_value)
         else:
-            raise NotImplementedError
+            raise NotImplementedError('The scale down functionality is not yet implemented.')
 
-        # resultant image stack should be (B, H, W, C)
-        image = torch.stack(valid_images, dim=0)
+        return image
 
-        return (image,)
+    def process_images(self, image1, image2, image3=None, image4=None, scale_interp='area',
+                       pad_color="#000000", scale_type='SCL_UP', pad_or_crop='PAD'):
+        images = [img for img in [image1, image2, image3, image4] if img is not None]
+
+        # Determine max height and width
+        max_height = max(img.shape[1] for img in images)
+        max_width = max(img.shape[2] for img in images)
+
+        # Process and resize images
+        for i, img in enumerate(images):
+            images[i] = self.process_image(img, max_height, max_width, scale_type, pad_color, scale_interp, pad_or_crop)
+
+        # Stack images into a single tensor
+        stacked_images = torch.stack(images, dim=0)
+        return stacked_images
 
 
 # Define a constant for MAX_RESOLUTION if needed
@@ -2238,6 +2149,121 @@ class DetectTextLines:
         line_images = [image[:, y1:y2 + 1, :, :] for y1, y2 in bounding_boxes]
 
         return (line_images,)
+
+
+@ETK_image_base
+class TileImage:
+    """repeat an image in a 3x3 grid, useful for checking for tiling artifacts"""
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {"required": {"image": ("IMAGE",)}}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "tile_image"
+
+    CATEGORY = "IMAGE"
+
+    def tile_image(self, image):
+        import torch
+        import torch.nn.functional as F
+
+        # image is already B,H,W,C
+
+        # pad the image to make it a multiple of 3
+        # height, width = image.shape[1:3]
+        # new_height = height + (3 - height % 3)
+        # new_width = width + (3 - width % 3)
+        # image = F.pad(image, (0, new_width - width, 0, new_height - height))
+
+        # repeat the image in each dimension
+        image = torch.cat([image, image, image], dim=1)
+        image = torch.cat([image, image, image], dim=2)
+
+        # now the image is 3x3 with each 1/3 being the original image
+        # now the image shape is B,3H,3W,5
+
+        return (image,)
+
+
+
+
+@ETK_image_base
+class FloodFillNode:
+    node_id = "comfyui.flood_fill"
+    node_name = "Flood Fill"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),  # Expecting a NumPy array or tensor
+                "start_x": ("INT", {"min": 0, "default": 0}),
+                "start_y": ("INT", {"min": 0, "default": 0}),
+                "target_color": ("STRING", {"default": "#FFFFFF"}),
+                "replacement_color": ("STRING", {"default": "#000000"}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+    CATEGORY = "image processing"
+
+    def __init__(self):
+        self.num_workers = None  # Can be set to the number of processes to create
+
+    @staticmethod
+    def hex_to_rgb(hex_color):
+        # Convert hex color string to RGB tuple
+        hex_color = hex_color.lstrip("#")
+        return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+    def flood_fill(self, image, start_coords, target_color, replacement_color):
+        # The flood fill algorithm assumes 2D image input (single sample from the batch)
+        image = image.squeeze(0)  # Remove the batch dimension assuming a single sample
+        height, width, _ = image.shape
+
+        target_color = torch.tensor(target_color, dtype=torch.float32)
+        replacement_color = torch.tensor(replacement_color, dtype=torch.float32)
+        target_color = target_color.view(1, 1, 3)
+        replacement_color = replacement_color.view(1, 1, 3)
+
+        start_x, start_y = start_coords
+        stack = [(start_x, start_y)]
+
+        # Convert to pixel value range [0, 1] if the max value is greater than 1
+        if image.max() > 1.0:
+            image = image / 255.0
+
+        visited = torch.zeros(height, width, dtype=torch.bool)
+
+        while len(stack) > 0:
+            x, y = stack.pop()
+            if not (0 <= x < width and 0 <= y < height) or visited[y, x] or not torch.allclose(image[y, x],
+                                                                                               target_color, atol=1e-6):
+                continue
+            visited[y, x] = True
+            image[y, x] = replacement_color
+            neighbors = [(x + dx, y + dy) for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]]
+            stack.extend(neighbors)
+
+        image = image.unsqueeze(0)  # Add the batch dimension back
+        return image
+
+    def execute(self, images, start_x, start_y, target_color_hex, replacement_color_hex):
+        target_color = self.hex_to_rgb(target_color_hex)
+        replacement_color = self.hex_to_rgb(replacement_color_hex)
+
+        # Normalize colors to [0, 1] range and convert to the tensor
+        target_color = [c / 255.0 for c in target_color]
+        replacement_color = [c / 255.0 for c in replacement_color]
+
+        # Apply flood fill to each image in the batch
+        for i in range(images.shape[0]):
+            images[i] = self.flood_fill(images[i], (start_x, start_y), target_color, replacement_color)
+
+        return images
+import torch
 
 
 if __name__ == "__main__":

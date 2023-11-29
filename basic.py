@@ -227,6 +227,8 @@ class IterableToAny:
     CATEGORY = "conversion"
 
     def get_value(self, LIST=None, DICT=None):
+        if not isinstance(LIST, list):
+            return (LIST, f"LIST is not a list: {LIST} is type: {type(LIST)}")
         if LIST:
             dbg = f"found LIST: {LIST}"
             return (LIST, dbg,)
