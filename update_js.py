@@ -1,9 +1,9 @@
 import os
+import shutil
+import getpass
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import ETK_PATH, GDE_PATH
 
-
 def check_for_js_extension():
-    import shutil
     for fn in ["ui_modifications.js", "ui_helpers.js"]:
         etk_file_path = os.path.normpath(os.path.join(GDE_PATH, "web", "extensions", "etk", fn))
         web_file_path = os.path.join(ETK_PATH, fn)
@@ -41,5 +41,8 @@ def check_for_js_extension():
         else:
             print(f"One or both of the files {etk_file_path} and {web_file_path} do not exist.")
 
+# Print the current user
+current_user = getpass.getuser()
+print(f"This script is being executed as user: {current_user}")
 
 check_for_js_extension()
