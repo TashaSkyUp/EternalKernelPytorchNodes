@@ -5,8 +5,9 @@ from importlib import reload
 import logging
 import os
 from folder_paths import output_directory, input_directory, temp_directory
-from custom_nodes.EternalKernelLiteGraphNodes.shared import GDE_PATH
-import custom_nodes.EternalKernelLiteGraphNodes.shared as shared
+from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
+
+from .update_js import check_for_js_extension
 
 fake_git = None
 real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # is this actually an uri?
@@ -38,25 +39,89 @@ class GitIO:
         return real_git_path
 
     def ensure_git_state(self, user: str):
+        import subprocess
         """works in windows or linux, ensures that the git repo is in the correct state"""
         if not os.path.exists(self.real_git_io_path):
             raise Exception("git io path not found")
         if not os.path.exists(os.path.join(self.real_git_io_path, ".git")):
             raise Exception("git io error, not a git repo")
+
+        def run_git_command(command: str):
+            """Helper function to run a git command in the correct directory"""
+            return subprocess.check_output(command, cwd=self.real_git_io_path, text=True).strip()
+
+
+        # fetch first?
+        run_git_command(["git", "fetch"])
+
         # get the current branch
-        current_branch = os.popen("git branch --show-current").read()
+        current_branch = run_git_command(["git", "branch", "--show-current"])
+
+
+        ##################
+
+        try:
+            origin_branch_exists = not run_git_command(["git", "rev-parse", "--verify", "--quiet", "origin/" + user])
+        except subprocess.CalledProcessError:
+            origin_branch_exists = False
+
+        try:
+            local_branch_exists = run_git_command(["git", "rev-parse", "--verify", "--quiet", user])
+            local_branch_exists = local_branch_exists != ""
+        except subprocess.CalledProcessError:
+            local_branch_exists = False
+
+        if not origin_branch_exists and not local_branch_exists:
+            # the branch does not exist locally or on the remote so create it here first
+            # checkout new_user
+            run_git_command(["git", "checkout", "new_user"])
+            # create new branch
+            run_git_command(["git", "checkout", "-b", user]) # creates and checks out new branch
+            # set the upstream to the remote
+            run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            # push the branch to the remote
+            run_git_command(["git", "push", "-u", "origin", user])
+            # fetch and pull it back down for good measure
+            run_git_command(["git", "fetch"])
+            run_git_command(["git", "pull"])
+
+        elif not origin_branch_exists and local_branch_exists:
+            # the branch does not exist on the remote but does locally
+            # set the upstream
+            run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            # push the branch to the remote
+            run_git_command(["git", "push", "-u", "origin", user])
+            # fetch and pull it back down for good measure
+            run_git_command(["git", "fetch"])
+            run_git_command(["git", "pull"])
+
+        elif origin_branch_exists and not local_branch_exists:
+            # the branch does not exist locally but does on the remote
+            # fetch and pull it down
+            run_git_command(["git", "checkout", user])
+            # pull
+            run_git_command(["git", "pull"])
+
+        elif origin_branch_exists and local_branch_exists:
+            # the branch exists locally and on the remote
+            # pull it down
+            run_git_command(["git", "checkout", user])
+            # set the upstream to the remote
+            run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+
+        current_branch = run_git_command(["git", "branch", "--show-current"])
         # if the current branch is not the user's branch, then switch to it
         if current_branch != user:
             # also check if the branch exists, if not then create it
-            branches = os.popen("git branch").read()
+            branches = run_git_command(["git", "branch"])
             if user not in branches:
-                os.system("git branch " + user)
-                os.system("git push --set-upstream origin " + user)
+                run_git_command(["git", "branch", user])
+                run_git_command(["git", "push", "--set-upstream", "origin", user])
             # switch to the user's branch
-            os.system("git checkout " + user)
+            run_git_command(["git", "checkout", user])
 
         # pull the latest from the user's branch
-        os.system("git pull")
+        run_git_command(["git", "pull"])
 
     def git_save_version_1(self, user: str, file_name: str, file_data: str):
         """
@@ -101,10 +166,10 @@ class GitIO:
 git_io = GitIO(real_git_url, GDE_PATH)
 
 user_data = {
-    "user1": {"password": "pass1",
+    "tasha": {"password": "qBizWaxq",
               "security": None,
               "client_id": None},
-    "user2": {"password": "pass2",
+    "user1": {"password": "pass1",
               "security": None,
               "client_id": None},
 
@@ -116,6 +181,14 @@ def get_user_by_client_id(client_id):
         if user_data[user]["client_id"] == client_id:
             return user
     return None
+
+
+async def get_user_if_client_id_logged_in(client_id):
+    try:
+        user = get_user_by_client_id(client_id)
+    except KeyError:
+        user = None
+    return user
 
 
 def get_user_by_security(security):
@@ -165,25 +238,29 @@ async def login(request):
     data = await request.json()
     try:
         client_id = data["client_id"]
+        has_client_id = True
     except:
         # this means the client id is not set yet so return logged_in False
         # use json to send the data back
+        has_client_id = False
         return web.json_response({"logged_in": False})
+
     try:
         user = data["username"]
         password = data["password"]
+        has_user_and_pass = True
     except:
+        has_user_and_pass = False
         # this means the client is just checking to see if it is already logged into the server
         # so check
         user = get_user_by_client_id(client_id)
         if user is None:
-            # use json to send the data back
             print("user is none")
-            return web.json_response({"logged_in": False})
+            return web.json_response({"logged_in": False}, status=401)
         else:
-            # use json to send the data back
-            print("user is not none")
-            return web.json_response({"logged_in": True})
+            # send the client back its user so it can handle api calls correctly
+            print("user recconected " + user)
+            return web.json_response({"logged_in": True, "user": user}, status=200)
 
     # validate the user and pass
     # for now the users and passes are right here in the code
@@ -256,10 +333,7 @@ def hijack_prompt_server():
                 else:
                     print("client_id:", client_id)
                     # find in users by client_id
-                    try:
-                        user = get_user_by_client_id(client_id)
-                    except KeyError:
-                        user = None
+                    user = await get_user_if_client_id_logged_in(client_id)
 
                     if user is None:
                         print("user not found")
@@ -277,6 +351,9 @@ def hijack_prompt_server():
                 # return post_handler(request)
 
 
+from aiohttp import web
+
+
 @PromptServer.instance.routes.post("/gde/git/user_graphs")
 async def get_user_graphs(request):
     """
@@ -284,12 +361,22 @@ async def get_user_graphs(request):
     """
     import os
     import subprocess
+
+    def run_git_command(command: list, dir_path: str):
+        """Helper function to run a git command in the specified directory"""
+        return subprocess.call(command, cwd=dir_path)
+
     data = await request.json()
+    client_id = data.get("client_id", None)
     user = data.get("user", None)
+    if user not in user_data:
+        user = get_user_by_client_id(client_id)
 
+    if await get_user_if_client_id_logged_in(client_id) is None:
+        return web.json_response({"error": "user not found"}, status=401)
+
+    #user = data.get("user", None)
     print("getting user graphs for user:", user)
-
-    # Ensure that the git repo is in the correct state
 
     # Directory where the user graphs are stored
     user_graphs_dir = git_io.real_git_io_path
@@ -297,21 +384,10 @@ async def get_user_graphs(request):
     # Ensure that the git repo is in the correct state
     git_io.ensure_git_state(user)
 
-    # Check if the branch exists
-    branch_exists = subprocess.call(["git", "rev-parse", "--verify", "--quiet", user])
-
-    # If the branch does not exist, create it
-    if branch_exists != 0:
-        subprocess.call(["git", "checkout", "-b", user])
-
-    # Pull the latest from the user's branch
-    subprocess.call(["git", "pull"])
-
-    # Get the list of user graph files
+    run_git_command(["git", "pull", "origin", user], user_graphs_dir)
     user_graph_files = [f for f in os.listdir(user_graphs_dir) if os.path.isfile(os.path.join(user_graphs_dir, f))]
-
-    # Convert the list of files to the desired format
     options_data = [{"value": f, "label": f} for f in user_graph_files if f != ""]
+    # options_data = []
 
     return web.json_response(options_data)
 
@@ -367,11 +443,12 @@ async def save_to_git(request):
     git_save_version = 1
     req_json = await request.json()
     print("saving to git")
-    global fake_git
+
     req_json = await request.json()
     data = req_json.get("data", None)
     user_name = req_json.get("user_name", None)
     file_name = req_json.get("file_name", None)
+
 
     git_io.git_save_version_1(user_name, file_name, data)
     # Implement your actual Git saving logic here
@@ -391,5 +468,6 @@ async def load_from_git(request):
     return web.json_response({"data": file_data})
 
 
+check_for_js_extension()
 if __name__ != 'EternalKernelLiteGraphNodes.server_endpoints':
     hijack_prompt_server()
