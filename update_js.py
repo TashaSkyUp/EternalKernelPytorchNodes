@@ -3,43 +3,51 @@ import shutil
 import getpass
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import ETK_PATH, GDE_PATH
 
+
+def check_directory_permissions(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    elif not os.access(directory, os.R_OK | os.W_OK):
+        raise PermissionError(f"Insufficient permissions for directory {directory}")
+
+
 def check_for_js_extension():
+    web_ext_path = os.path.normpath(os.path.join(GDE_PATH, "web", "extensions", "etk"))
+    repo_file_path = os.path.join(ETK_PATH)
+
+    # Check permissions for both directories
+    check_directory_permissions(web_ext_path)
+    check_directory_permissions(repo_file_path)
+
     for fn in ["ui_modifications.js", "ui_helpers.js"]:
-        etk_file_path = os.path.normpath(os.path.join(GDE_PATH, "web", "extensions", "etk", fn))
-        web_file_path = os.path.join(ETK_PATH, fn)
 
-        # Check if both files exist
-        if os.path.exists(etk_file_path) and os.path.exists(web_file_path):
-            # Check for read and write permissions
-            if not os.access(etk_file_path, os.R_OK):
-                raise PermissionError(f"Read permission denied for {etk_file_path}")
-            if not os.access(web_file_path, os.W_OK):
-                raise PermissionError(f"Write permission denied for {web_file_path}")
+        file_web_path = os.path.join(web_ext_path, fn)
+        file_repo_path = os.path.join(repo_file_path, fn)
 
-            etk_dir_file_mtime = os.path.getmtime(etk_file_path)
-            web_dir_file_mtime = os.path.getmtime(web_file_path)
+        try:
+            file_web_date = os.path.getmtime(file_web_path)
+        except FileNotFoundError:
+            file_web_date = 0
 
-            # Determine direction of copy
-            if etk_dir_file_mtime > web_dir_file_mtime:
-                copy_from = etk_file_path
-                copy_to = web_file_path
-            else:
-                copy_from = web_file_path
-                copy_to = etk_file_path
+        try:
+            file_repo_date = os.path.getmtime(file_repo_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"File {file_repo_path} does not exist. Please check that the ETK_PATH is set correctly."
+            )
 
-            # Check if destination directory exists and has write permission
-            dest_dir = os.path.dirname(copy_to)
-            if not os.path.exists(dest_dir):
-                os.makedirs(dest_dir)
-            elif not os.access(dest_dir, os.W_OK):
-                raise PermissionError(f"Write permission denied for directory {dest_dir}")
-
-            # Copy the file and give feedback
-            print(f"Copying {copy_from} to {copy_to}, because the file is out of date")
-            shutil.copyfile(copy_from, copy_to)
-            print(f"Copied {copy_from} to {copy_to}")
+        if file_web_date > file_repo_date:
+            direction = "web -> repo"
+            from_file = file_web_path
+            to_file = file_repo_path
         else:
-            print(f"One or both of the files {etk_file_path} and {web_file_path} do not exist.")
+            direction = "repo -> web"
+            from_file = file_repo_path
+            to_file = file_web_path
+
+        print(f"Copying {direction}: {from_file} -> {to_file}")
+        shutil.copyfile(from_file, to_file)
+
 
 # Print the current user
 current_user = getpass.getuser()
