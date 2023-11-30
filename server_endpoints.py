@@ -62,6 +62,7 @@ class GitIO:
 
         try:
             origin_branch_exists = not run_git_command(["git", "rev-parse", "--verify", "--quiet", "origin/" + user])
+            origin_branch_exists = origin_branch_exists != ""
         except subprocess.CalledProcessError:
             origin_branch_exists = False
 
