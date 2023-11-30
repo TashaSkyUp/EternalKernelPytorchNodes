@@ -3,6 +3,19 @@ import shutil
 import getpass
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import ETK_PATH, GDE_PATH
 
+import time
+
+
+def set_file_mtime(file_path, mtime):
+    """
+    Set the modified time of the file to the specified time.
+
+    :param file_path: Path of the file to modify.
+    :param mtime: The new modified time as a timestamp (seconds since the epoch).
+    """
+    atime = os.path.getatime(file_path)  # keep the original access time
+    os.utime(file_path, (atime, mtime))
+
 
 def check_directory_permissions(directory):
     if not os.path.exists(directory):
@@ -36,17 +49,24 @@ def check_for_js_extension():
                 f"File {file_repo_path} does not exist. Please check that the ETK_PATH is set correctly."
             )
 
+        if file_web_date == file_repo_date:
+            print(f"Files are identical: {file_web_path} = {file_repo_path}")
+            continue
+
         if file_web_date > file_repo_date:
             direction = "web -> repo"
             from_file = file_web_path
             to_file = file_repo_path
+            from_time = file_web_date
         else:
             direction = "repo -> web"
             from_file = file_repo_path
             to_file = file_web_path
+            from_time = file_repo_date
 
         print(f"Copying {direction}: {from_file} -> {to_file}")
         shutil.copyfile(from_file, to_file)
+        set_file_mtime(to_file, from_time)
 
 
 # Print the current user
