@@ -72,6 +72,7 @@ class GitIO:
             local_branch_exists = False
 
         if not origin_branch_exists and not local_branch_exists:
+            print(f"git branch {user} does not exist locally or on the remote")
             # the branch does not exist locally or on the remote so create it here first
             # checkout new_user
             run_git_command(["git", "checkout", "new_user"])
@@ -86,6 +87,7 @@ class GitIO:
             run_git_command(["git", "pull"])
 
         elif not origin_branch_exists and local_branch_exists:
+            print(f"git branch {user} exists locally but not on the remote")
             # the branch does not exist on the remote but does locally
             # set the upstream
             run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
@@ -96,6 +98,7 @@ class GitIO:
             run_git_command(["git", "pull"])
 
         elif origin_branch_exists and not local_branch_exists:
+            print(f"git branch {user} exists on the remote but not locally")
             # the branch does not exist locally but does on the remote
             # fetch and pull it down
             run_git_command(["git", "checkout", user])
@@ -103,6 +106,7 @@ class GitIO:
             run_git_command(["git", "pull"])
 
         elif origin_branch_exists and local_branch_exists:
+            print(f"git branch {user} exists locally and on the remote")
             # the branch exists locally and on the remote
             # pull it down
             run_git_command(["git", "checkout", user])
@@ -112,10 +116,13 @@ class GitIO:
         current_branch = run_git_command(["git", "branch", "--show-current"])
         # if the current branch is not the user's branch, then switch to it
         if current_branch != user:
+            print(f"git branch {user} is not the current branch, switching to it")
             # also check if the branch exists, if not then create it
             branches = run_git_command(["git", "branch"])
             if user not in branches:
                 run_git_command(["git", "branch", user])
+                # be verbose about what exactly is happening where
+                print(f"git branch {user} does not exist locally, creating it, and pushing it to the remote")
                 run_git_command(["git", "push", "--set-upstream", "origin", user])
             # switch to the user's branch
             run_git_command(["git", "checkout", user])
