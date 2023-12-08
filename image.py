@@ -221,7 +221,7 @@ class TinyTxtToImg:
     RETURN_NAMES = ("image", "FUNC", "latent", "positive", "negative",)
     FUNCTION = "tinytxt2img"
 
-    @profile
+
     def tinytxt2img(self, **kwargs):
         """ use the imports from nodes to generate an image from text """
 
