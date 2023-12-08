@@ -6,8 +6,8 @@ import logging
 import os
 from folder_paths import output_directory, input_directory, temp_directory
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
+from .config import config_settings
 
-from .update_js import check_for_js_extension
 
 fake_git = None
 real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # is this actually an uri?
@@ -343,7 +343,18 @@ def hijack_prompt_server():
                     # find in users by client_id
                     user = await get_user_if_client_id_logged_in(client_id)
 
-                    if user is None:
+
+                    if config_settings["skip_login_for_local"]:
+                        peername = request.transport.get_extra_info('peername')
+                        if peername is not None:
+                            host, _ = peername
+                            if host == '127.0.0.1' or host == '::1':
+                                print("skipping login for local")
+                            else:
+                                print("user not found")
+                                return web.json_response({"error": "user not found"}, status=401)
+
+                    elif user is None:
                         print("user not found")
                         return web.json_response({"error": "user not found"}, status=401)
                     else:
@@ -476,6 +487,6 @@ async def load_from_git(request):
     return web.json_response({"data": file_data})
 
 
-check_for_js_extension()
+
 if __name__ != 'EternalKernelLiteGraphNodes.server_endpoints':
     hijack_prompt_server()
