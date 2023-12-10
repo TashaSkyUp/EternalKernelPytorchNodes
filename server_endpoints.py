@@ -50,13 +50,11 @@ class GitIO:
             """Helper function to run a git command in the correct directory"""
             return subprocess.check_output(command, cwd=self.real_git_io_path, text=True).strip()
 
-
         # fetch first?
         run_git_command(["git", "fetch"])
 
         # get the current branch
         current_branch = run_git_command(["git", "branch", "--show-current"])
-
 
         ##################
 
@@ -78,7 +76,7 @@ class GitIO:
             # checkout new_user
             run_git_command(["git", "checkout", "new_user"])
             # create new branch
-            run_git_command(["git", "checkout", "-b", user]) # creates and checks out new branch
+            run_git_command(["git", "checkout", "-b", user])  # creates and checks out new branch
             # set the upstream to the remote
             run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
             # push the branch to the remote
@@ -298,76 +296,86 @@ async def login(request):
     return web.json_response({"security": security})
 
 
-def hijack_prompt_server():
+def hijack_prompt_server(route_path,
+                         before_get_func: callable = None,
+                         after_get_func: callable = None,
+                         before_post_func: callable = None,
+                         after_post_func: callable = None,
+                         ):
     """
     This function is called by the GDE when it starts up, it hijacks the prompt server
     for added security.
     """
+    from server import PromptServer
+
+    # find the existing /prompt route
+    rts = [i for i, s in enumerate(PromptServer.instance.routes) if (route_path in str(s))]
+    print(f"found {len(rts)} routes to remove: {rts}")
+
     # remove the existing prompt route
-    q = [i for i, s in enumerate(PromptServer.instance.routes) if ("/prompt" in str(s))]
-    print(f"found {len(q)} routes to remove: {q}")
-    for adj, i in enumerate(q):
-        route = PromptServer.instance.routes._items.pop(i - adj)
+    for i, rt_num in enumerate(rts):
+        rt_to_pop = rt_num - i
+        route = PromptServer.instance.routes._items.pop(rt_to_pop)
+
+        #route = PromptServer.instance.routes._items[rt_to_pop]
+        #myr = web.RouteTableDef()
+
 
         method = route.method
         path = route.path
         kwargs = route.kwargs
 
         if method == "GET":
-            print(f"removing route {method} {path} {kwargs}")
+            print(f"Hijacking route {method} {path} {kwargs}")
             get_handler = route.handler
+            if not before_get_func:
+                if not after_get_func:
+                    raise NotImplementedError
 
-            @PromptServer.instance.routes.get(path)
-            async def get_prompt(request):
-                print("hijacked prompt get /prompt")
-                print("headers:", request.headers)
-                modified_func_response = await get_handler(request)
-                return modified_func_response
+            if before_get_func and after_get_func:
+                raise NotImplementedError
+
+            if before_get_func:
+                @PromptServer.instance.routes.get(path)
+                async def get_prompt(request):
+                    part1 = await  before_get_func(request)
+                    if isinstance(part1, web.Response):
+                        return part1
+                    if isinstance(part1, web.Request):
+                        modified_func_response = await get_handler(part1)
+                    return modified_func_response
+            elif after_get_func:
+                @PromptServer.instance.routes.get(path)
+                async def get_prompt(request):
+                    normal_handler_response = await get_handler(request)
+                    modified_func_response = await  after_get_func(normal_handler_response)
+                    return modified_func_response
 
         elif method == "POST":
-            print(f"removing route {method} {path} {kwargs}")
+            print(f"Hijacking route {method} {path} {kwargs}")
             post_handler = route.handler
+            if not before_post_func:
+                if not after_post_func:
+                    raise NotImplementedError
 
-            @PromptServer.instance.routes.post(path)
-            async def post_prompt(request: web.Request):
-                # print("hijacked prompt post /prompt")
-                # print("headers:", request.headers)
+            if before_post_func and after_post_func:
+                raise NotImplementedError
 
-                json_data = await request.json()
-                client_id = json_data.get("client_id", None)
-                if client_id is None:
-                    print("client_id is None")
-                    return web.Response(text="client_id is None", status=400)
-                else:
-                    print("client_id:", client_id)
-                    # find in users by client_id
-                    user = await get_user_if_client_id_logged_in(client_id)
-
-
-                    if config_settings["skip_login_for_local"]:
-                        peername = request.transport.get_extra_info('peername')
-                        if peername is not None:
-                            host, _ = peername
-                            if host == '127.0.0.1' or host == '::1':
-                                print("skipping login for local")
-                            else:
-                                print("user not found")
-                                return web.json_response({"error": "user not found"}, status=401)
-
-                    elif user is None:
-                        print("user not found")
-                        return web.json_response({"error": "user not found"}, status=401)
-                    else:
-                        print(f"minimal security check passed for user {user}")
-
-                modified_func_response: web.Response = await post_handler(request)
-
-                print(modified_func_response.headers)
-
-                return modified_func_response
-
-                # return await post_handler(request)
-                # return post_handler(request)
+            if before_post_func:
+                @PromptServer.instance.routes.post(path)
+                async def post_prompt(request):
+                    part1 = await  before_post_func(request)
+                    if isinstance(part1, web.Response):
+                        return part1
+                    if isinstance(part1, web.Request):
+                        modified_func_response = await post_handler(part1)
+                    return modified_func_response
+            elif after_post_func:
+                @PromptServer.instance.routes.post(path)
+                async def post_prompt(request):
+                    normal_handler_response = await post_handler(request)
+                    modified_func_response = await after_post_func(normal_handler_response)
+                    return modified_func_response
 
 
 from aiohttp import web
@@ -394,7 +402,7 @@ async def get_user_graphs(request):
     if await get_user_if_client_id_logged_in(client_id) is None:
         return web.json_response({"error": "user not found"}, status=401)
 
-    #user = data.get("user", None)
+    # user = data.get("user", None)
     print("getting user graphs for user:", user)
 
     # Directory where the user graphs are stored
@@ -468,7 +476,6 @@ async def save_to_git(request):
     user_name = req_json.get("user_name", None)
     file_name = req_json.get("file_name", None)
 
-
     git_io.git_save_version_1(user_name, file_name, data)
     # Implement your actual Git saving logic here
     return web.Response(text="Saved to Git successfully.")
@@ -487,6 +494,42 @@ async def load_from_git(request):
     return web.json_response({"data": file_data})
 
 
+# print(f"Hijacking route {method} {path} {kwargs}")
+# post_handler = route.handler
+#
+
+async def my_post_hijack_before(request: web.Request):
+    json_data = await request.json()
+    client_id = json_data.get("client_id", None)
+    ret = request
+
+    print("client_id:", client_id)
+    # find in users by client_id
+    user = await get_user_if_client_id_logged_in(client_id)
+
+    if config_settings["skip_login_for_local"]:
+        peername = request.transport.get_extra_info('peername')
+        if peername is not None:
+            host, _ = peername
+            if host == '127.0.0.1' or host == '::1':
+                print("skipping login for local")
+            else:
+                print("user not found")
+                ret = web.json_response({"error": "user not found"}, status=401)
+
+    elif user is None:
+        print("user not found")
+        ret = web.json_response({"error": "user not found"}, status=401)
+
+    else:
+        print(f"minimal security check passed for user {user}")
+
+    return ret
+
+
+async def my_get_hijack_after(response):
+    return response
+
 
 if __name__ != 'EternalKernelLiteGraphNodes.server_endpoints':
-    hijack_prompt_server()
+    hijack_prompt_server("/prompt", after_get_func=my_get_hijack_after, before_post_func=my_post_hijack_before)
