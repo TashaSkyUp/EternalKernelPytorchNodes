@@ -63,7 +63,8 @@ else:  # if not a unit test
             if hasattr(module, "NODE_CLASS_MAPPINGS"):
                 mappings = module.NODE_CLASS_MAPPINGS
                 NODE_CLASS_MAPPINGS.update(mappings)
-                print(f"ETK: updated with {mappings}")
+                for k, v in mappings.items():
+                    print(f"ETK: updated with {k}")
 
             if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS"):
                 NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
