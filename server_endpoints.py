@@ -8,7 +8,6 @@ from folder_paths import output_directory, input_directory, temp_directory
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
 from .config import config_settings
 
-
 fake_git = None
 real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # is this actually an uri?
 
@@ -317,9 +316,8 @@ def hijack_prompt_server(route_path,
         rt_to_pop = rt_num - i
         route = PromptServer.instance.routes._items.pop(rt_to_pop)
 
-        #route = PromptServer.instance.routes._items[rt_to_pop]
-        #myr = web.RouteTableDef()
-
+        # route = PromptServer.instance.routes._items[rt_to_pop]
+        # myr = web.RouteTableDef()
 
         method = route.method
         path = route.path
@@ -501,28 +499,23 @@ async def load_from_git(request):
 async def my_post_hijack_before(request: web.Request):
     json_data = await request.json()
     client_id = json_data.get("client_id", None)
+
     ret = request
 
     print("client_id:", client_id)
-    # find in users by client_id
+
     user = await get_user_if_client_id_logged_in(client_id)
+    skp_lcl = config_settings["skip_login_for_local"]
+    is_local_request = request.transport.get_extra_info('peername')[0] in (
+        '127.0.0.1', '::1') if request.transport.get_extra_info('peername') else False
 
-    if config_settings["skip_login_for_local"]:
-        peername = request.transport.get_extra_info('peername')
-        if peername is not None:
-            host, _ = peername
-            if host == '127.0.0.1' or host == '::1':
-                print("skipping login for local")
-            else:
-                print("user not found")
-                ret = web.json_response({"error": "user not found"}, status=401)
-
-    elif user is None:
-        print("user not found")
-        ret = web.json_response({"error": "user not found"}, status=401)
-
+    if user:
+        print("user:", user)
+        ret = request
+    elif skp_lcl and is_local_request:
+        ret = request
     else:
-        print(f"minimal security check passed for user {user}")
+        ret = web.json_response({"error": "user not found"}, status=401)
 
     return ret
 
