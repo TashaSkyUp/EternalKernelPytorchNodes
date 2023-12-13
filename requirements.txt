@@ -8,3 +8,4 @@ librosa
 moviepy
 openai-whisper
 addict
+fastnoisesimd

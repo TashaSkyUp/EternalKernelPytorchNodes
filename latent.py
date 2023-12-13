@@ -1,7 +1,7 @@
 #from nodes import MAX_RESOLUTION
 import torch
 
-from custom_nodes.EternalKernelLiteGraphNodes.components import fields as field
+#from custom_nodes.EternalKernelLiteGraphNodes.components import fields as field
 
 
 class LatentInterpolation:
@@ -14,7 +14,7 @@ class LatentInterpolation:
             "required": {
                 "latent1": ("LATENT",),
                 "latent2": ("LATENT",),
-                "t": field.FLOAT,
+                "t": ("FLOAT", {"default": 0.5}),
             }
         }
 
