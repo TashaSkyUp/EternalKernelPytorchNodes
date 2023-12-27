@@ -1,1 +1,5 @@
 skip_login_for_local: true
+tmp_dir: comfy_path/tmp
+gitio:
+  COTRF: https://github.com/Hopping-Mad-Games/COTRF.git
+  StSq: https://github.com/story-squad/GDE_Graph_IO.git

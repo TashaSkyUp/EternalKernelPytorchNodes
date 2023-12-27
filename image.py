@@ -1904,7 +1904,7 @@ class FuncImageStackToImageStack:
         my_locals = locals()
 
         image_x = kwargs.get("image", None)
-        gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
+        #gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
 
         my_locals["x"] = func
         my_locals["x_image"] = kwargs.get("image", None)

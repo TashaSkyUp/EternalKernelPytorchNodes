@@ -552,6 +552,99 @@ class FuncAnysToLatent:
         else:
             return (None,)
 
+@ETK_functional_base
+class FuncAnysToString:
+    """runs eval on the given text, with 5 anys as input and outputs a string"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = optional(
+            both(
+                both({"any1": ("*", {"default": None})}, {"any2": ("*", {"default": None})}),
+                both({"any3": ("*", {"default": None})}, {"any4": ("*", {"default": None})})
+            ),
+        )
+        req["required"] = {}
+        req["required"].update(_text)
+
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        code = kwargs.get("code", None)
+        any1 = kwargs.get("any1", None)
+        any2 = kwargs.get("any2", None)
+        any3 = kwargs.get("any3", None)
+        any4 = kwargs.get("any4", None)
+
+        my_globals = globals()
+        my_locals = locals()
+
+        my_locals["any1"] = any1
+        my_locals["any2"] = any2
+        my_locals["any3"] = any3
+        my_locals["any4"] = any4
+
+        exec(code, my_globals, my_locals)
+        if "y" in my_locals.keys():
+            return (my_locals["y"],)
+        elif "y" in my_globals.keys():
+            return (my_globals["y"],)
+        else:
+            return (None,)
+
+@ETK_functional_base
+class FuncAnysToList:
+    """runs eval on the given text, with 5 anys as input and outputs a list"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = optional(
+            both(
+                both({"any1": ("*", {"default": None})}, {"any2": ("*", {"default": None})}),
+                both({"any3": ("*", {"default": None})}, {"any4": ("*", {"default": None})})
+            ),
+        )
+        req["required"] = {}
+        req["required"].update(_text)
+
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        code = kwargs.get("code", None)
+        any1 = kwargs.get("any1", None)
+        any2 = kwargs.get("any2", None)
+        any3 = kwargs.get("any3", None)
+        any4 = kwargs.get("any4", None)
+
+        my_globals = globals()
+        my_locals = locals()
+
+        my_locals["any1"] = any1
+        my_locals["any2"] = any2
+        my_locals["any3"] = any3
+        my_locals["any4"] = any4
+
+        exec(code, my_globals, my_locals)
+        if "y" in my_locals.keys():
+            return (my_locals["y"],)
+        elif "y" in my_globals.keys():
+            return (my_globals["y"],)
+        else:
+            return (None,)
 if __name__ == "__main__":
     test = {}
 

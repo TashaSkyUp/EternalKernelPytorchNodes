@@ -77,7 +77,8 @@ class ABCWidgetMetaclass(ABCMeta):
         if (ABC in bases) or (ABCVideoWidget in bases) or ("ABC" in name):
             pass
         else:
-            NODE_CLASS_MAPPINGS["ETK/" + str(name)] = cls
+            NODE_CLASS_MAPPINGS[str(name)] = cls
+            cls.CATEGORY = "ETK/video"
         super().__init__(name, bases, attrs)
 
 
@@ -164,7 +165,7 @@ class ABCABCVideoFileToImage(ABCVideoWidget, metaclass=ABCWidgetMetaclass):
                 "idx_slice_stop": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 1}),
                 "slice_idx_step": ("INT", {"min": 0, "max": 9999, "step": 1, "default": 1}),
                 "idx": ("INT", {"min": 0, "max": 99999, "step": 1, "default": 0}),
-                "func_only": ([True, False], {"default": False}),
+                "func_only": ([False, True], {"default": False}),
             },
 
         }
@@ -281,7 +282,9 @@ class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
         return ret
 
     CATEGORY = "video"
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "LIST",)
+    RETURN_NAMES = ("image_stack", "[img_fname]",)
+
     FUNCTION = "handler"
 
     @torch.inference_mode()
@@ -304,6 +307,7 @@ class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
 
         folder_in_path = folder_in
         image_list = []
+        image_fname_list = []
 
         p = os.path.abspath(folder_in_path)
         # List and sort all PNG or JPG files in the folder
@@ -333,6 +337,7 @@ class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
         # for i in range(idx_slice_start + idx, idx_slice_stop + idx):
         for fn in file_fps[idx_slice_start + idx:idx_slice_start + idx + slice_size]:
             image = cv2.imread(fn)
+            image_fname_list.append(os.path.basename(fn))
             if image is not None:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # converting to RGB format
                 image_list.append(image)
@@ -344,7 +349,7 @@ class VideoFramesFolderToImageStack(metaclass=ABCWidgetMetaclass):
             tensor = torch.stack([torch.tensor(img, dtype=torch.float32) for img in image_list])
         del image_list
         tensor = tensor / 255.0
-        return (tensor,)
+        return (tensor, image_fname_list,)
 
 
 class SmoothStackTemporalByDistance2(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
@@ -1900,6 +1905,7 @@ class TransformImageStack(metaclass=ABCWidgetMetaclass):
             x_image[t] = transformed_frame
 
         return (x_image.detach().clone(),)
+
 
 class PanByStep(metaclass=ABCWidgetMetaclass):
     """

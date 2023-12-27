@@ -1,3 +1,5 @@
+from .config import config_settings
+
 import json
 from server import PromptServer
 from aiohttp import web
@@ -6,10 +8,11 @@ import logging
 import os
 from folder_paths import output_directory, input_directory, temp_directory
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
-from .config import config_settings
 
 fake_git = None
-real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # is this actually an uri?
+#real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # ssh url
+#real_git_url = "https://github.com/Hopping-Mad-Games/COTRF.git"  # ssh url
+
 
 
 class GitIO:
@@ -18,8 +21,9 @@ class GitIO:
         self.real_git_io_path = self.setup_git_io(i_real_git_url)
 
     def setup_git_io(self, l_real_git_url: str):
+        git_name = l_real_git_url.split("/")[-1].split(".")[0]
         real_git_path = os.path.join(self.gde_path, "data")
-        real_git_path = os.path.join(real_git_path, "GDE_Graph_IO")
+        real_git_path = os.path.join(real_git_path, git_name)
 
         # check to see if it exists and is a git repo, if not then clone it
         if os.path.exists(real_git_path):
@@ -75,9 +79,11 @@ class GitIO:
             # checkout new_user
             run_git_command(["git", "checkout", "new_user"])
             # create new branch
-            run_git_command(["git", "checkout", "-b", user])  # creates and checks out new branch
+            run_git_command(["git", "branch", user])  # creates and checks out new branch
+            # git checkout feature-branch
+            run_git_command(["git", "checkout", user])
             # set the upstream to the remote
-            run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            #run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
             # push the branch to the remote
             run_git_command(["git", "push", "-u", "origin", user])
             # fetch and pull it back down for good measure
@@ -88,7 +94,7 @@ class GitIO:
             print(f"git branch {user} exists locally but not on the remote")
             # the branch does not exist on the remote but does locally
             # set the upstream
-            run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            #run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
             # push the branch to the remote
             run_git_command(["git", "push", "-u", "origin", user])
             # fetch and pull it back down for good measure
@@ -168,17 +174,23 @@ class GitIO:
         return file_data
 
 
-git_io = GitIO(real_git_url, GDE_PATH)
+git_io = None
 
 user_data = {
-    "tasha": {"password": "qBizWaxq",
-              "security": None,
-              "client_id": None},
-    "user1": {"password": "pass1",
-              "security": None,
-              "client_id": None},
+    "tasha_StSq": {
+        "password": "[REDACTED]",
+        "security": None,
+        "client_id": None,
+        "git_io": "StSq"
+    },
+    "tasha_COTRF": {
+        "password": "[REDACTED]",
+        "security": None,
+        "client_id": None,
+        "git_io": "COTRF"
+        },
+    }
 
-}
 
 
 def get_user_by_client_id(client_id):
@@ -224,6 +236,8 @@ async def logout(request):
     # clear the security and client id
     user_data[user]["security"] = None
     user_data[user]["client_id"] = None
+    global git_io
+    git_io = None
 
     # use json to send the data back
     return web.json_response({"success": True})
@@ -290,6 +304,17 @@ async def login(request):
     # store the security in memory
     user_data[user]["security"] = security
     user_data[user]["client_id"] = client_id
+
+    global git_io
+    users_gitio = user_data[user]["git_io"]
+    users_gitio_path = os.path.join(GDE_PATH, users_gitio)
+
+    try:
+        users_gittio_url = config_settings["gitio"][users_gitio]
+    except KeyError:
+        return web.json_response({"error": "invalid gitio"}, status=401)
+
+    git_io = GitIO(users_gittio_url, users_gitio_path)
 
     # return json with the security
     return web.json_response({"security": security})
