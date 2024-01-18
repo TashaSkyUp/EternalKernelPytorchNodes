@@ -10,9 +10,10 @@ from folder_paths import output_directory, input_directory, temp_directory
 from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
 
 fake_git = None
-#real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # ssh url
-#real_git_url = "https://github.com/Hopping-Mad-Games/COTRF.git"  # ssh url
 
+
+# real_git_url = "https://github.com/story-squad/GDE_Graph_IO.git"  # ssh url
+# real_git_url = "https://github.com/Hopping-Mad-Games/COTRF.git"  # ssh url
 
 
 class GitIO:
@@ -22,8 +23,15 @@ class GitIO:
 
     def setup_git_io(self, l_real_git_url: str):
         git_name = l_real_git_url.split("/")[-1].split(".")[0]
-        real_git_path = os.path.join(self.gde_path, "data")
-        real_git_path = os.path.join(real_git_path, git_name)
+
+        real_git_path = os.path.join(self.gde_path, "data","gitio",git_name)
+
+
+        # users_gitio_path = os.path.abspath(os.path.join(
+        #     GDE_PATH,
+        #     config_settings["gitio"]["base"],
+        #     users_gitio)
+        # )
 
         # check to see if it exists and is a git repo, if not then clone it
         if os.path.exists(real_git_path):
@@ -83,7 +91,7 @@ class GitIO:
             # git checkout feature-branch
             run_git_command(["git", "checkout", user])
             # set the upstream to the remote
-            #run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            # run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
             # push the branch to the remote
             run_git_command(["git", "push", "-u", "origin", user])
             # fetch and pull it back down for good measure
@@ -94,7 +102,7 @@ class GitIO:
             print(f"git branch {user} exists locally but not on the remote")
             # the branch does not exist on the remote but does locally
             # set the upstream
-            #run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
+            # run_git_command(["git", "branch", "--set-upstream-to", "origin/" + user])
             # push the branch to the remote
             run_git_command(["git", "push", "-u", "origin", user])
             # fetch and pull it back down for good measure
@@ -188,9 +196,8 @@ user_data = {
         "security": None,
         "client_id": None,
         "git_io": "COTRF"
-        },
-    }
-
+    },
+}
 
 
 def get_user_by_client_id(client_id):
@@ -251,6 +258,7 @@ async def login(request):
     - sets up security
     - user and pass are in the json
     """
+
     print("login request")
 
     # get the user and pass from the json
@@ -306,15 +314,24 @@ async def login(request):
     user_data[user]["client_id"] = client_id
 
     global git_io
+
+    #from . import config
+    #config_settings = config.config_settings
+
     users_gitio = user_data[user]["git_io"]
-    users_gitio_path = os.path.join(GDE_PATH, users_gitio)
+
+    #users_gitio_path = os.path.abspath(os.path.join(
+    #    GDE_PATH,
+    #    config_settings["gitio"]["base"],
+    #    users_gitio)
+    #)
 
     try:
         users_gittio_url = config_settings["gitio"][users_gitio]
     except KeyError:
         return web.json_response({"error": "invalid gitio"}, status=401)
 
-    git_io = GitIO(users_gittio_url, users_gitio_path)
+    git_io = GitIO(users_gittio_url, GDE_PATH)
 
     # return json with the security
     return web.json_response({"security": security})

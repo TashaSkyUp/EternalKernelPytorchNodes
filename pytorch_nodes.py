@@ -5,6 +5,7 @@ import torch.nn as nn
 import functools
 import torch
 import json
+
 try:
     from .config import config_settings
 except ImportError as e:
@@ -1086,6 +1087,8 @@ class RandomTensor:
         elif init_method == "randn_like":
             output = torch.randn_like(shape, dtype=dto)
         return (output,)
+
+
 @ETK_pytorch_base
 class GridSearchTraining:
     """
@@ -1165,10 +1168,63 @@ class GridSearchTraining:
         return current_metrics[-1] < min(all_metrics, key=lambda m: m[-1])[-1]
 
 
+@ETK_pytorch_base
+class SaveTorchTensor:
+    """
+    Saves a torch tensor to a file using torch.save which has the required parameters of obj and f
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "tensor": ("TORCH_TENSOR", {"default": None}),
+                "file": ("STRING", {"default": "/somewhere/some.pt"}),
+            },
+
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "save_torch_tensor"
+
+    def save_torch_tensor(self, tensor, file):
+        import torch
+        """
+        Saves a torch tensor to a file
+        """
+        torch.save(tensor, file)
+        return (file,)
+
+
+@ETK_pytorch_base
+class LoadTorchTensor:
+    """
+    Loads a torch tensor from a file using torch.load
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "file": ("STRING", {"default": "/somewhere/some.pt"}),
+            },
+
+        }
+
+    RETURN_TYPES = ("TORCH_TENSOR",)
+    FUNCTION = "load_torch_tensor"
+
+    def load_torch_tensor(self, file):
+        import torch
+        """
+        Loads a torch tensor from a file
+        """
+        return (torch.load(file),)
 
 
 if __name__ == "__main__":
     import json
+
     # Example usage
     param_grid_str = json.dumps({
         'epochs': [1, 2],

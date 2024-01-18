@@ -77,7 +77,7 @@ class SampleDDPMPipline:
             },
         }
 
-    RETURN_TYPES = ("TENSOR",)
+    RETURN_TYPES = ("TORCH_TENSOR",)
     FUNCTION = "sample"
 
     def sample(
@@ -105,7 +105,7 @@ class TensorToImage:
         return {
             "required": {
                 "tensor": ("TORCH_TENSOR", {}),
-                "incoming_format": (["BHWC", "BCHW","HWC"], {"default": "BHWC"}
+                "incoming_format": (["BHWC", "BCHW", "HWC"], {"default": "BHWC"}
                                     ),
             },
         }
@@ -123,6 +123,7 @@ class TensorToImage:
         tensor = tensor.clamp(0, 1)
 
         return (tensor,)
+
 
 @ETK_HF_Diffusers_base
 class LoadHFDataset:
@@ -145,3 +146,108 @@ class LoadHFDataset:
                            split="train",
                            )
         return (ret,)
+
+
+@ETK_HF_Diffusers_base
+class CreateUnet2dModel:
+    """A node that creates a unet2d model"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        down_blocks = ("DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D")
+        mid_blocks = ('UNetMidBlock2D', 'UnCLIPUNetMidBlock2D')
+        up_blocks = ("AttnUpBlock2D", "AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D")
+
+        return {
+            "required": {
+                "name": ("STRING", {"default": "UNet2D"}),
+            },
+            "optional": {
+                "sample_size": ("TUPLE", {"default": (32, 32, 3,)}),
+                "in_channels": ("INT", {"default": 3}),
+                "out_channels": ("INT", {"default": 3}),
+                "norm_num_groups": ("INT", {"default": 32}),
+                "layers_per_block": ("INT", {"default": 2}),
+                "down_block_types": ("TUPLE", {"default": (down_blocks[0],)}),
+                "mid_block_scale_factor": ("FLOAT", {"default": 1.0}),
+                "up_block_types": ("TUPLE", {"default": (up_blocks[0],)}),
+                "block_out_channels": ("TUPLE", {"default": (64, 128, 256, 512,)}),
+            },
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "create_unet2d_model"
+
+    def create_unet2d_model(self, name, sample_size, in_channels, out_channels, norm_num_groups, layers_per_block,
+                            down_block_types=("AttnDownBlock2D",),
+                            mid_block_scale_factor=("UNetMidBlock2D",),
+                            up_block_types=("AttnUpBlock2D",),
+                            block_out_channels=(64, 128, 256, 512,)
+                            ):
+        from diffusers import UNet2DModel
+        with torch.inference_mode(False):
+            ret = UNet2DModel(
+                sample_size=sample_size,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                norm_num_groups=norm_num_groups,
+                layers_per_block=layers_per_block,
+                down_block_types=down_block_types,
+                mid_block_scale_factor=mid_block_scale_factor,
+                up_block_types=up_block_types,
+                block_out_channels=block_out_channels,
+
+            )
+        for param in ret.parameters():
+            param.requires_grad = True
+            #param.retains_grad = True
+
+        return (ret,)
+
+@ETK_HF_Diffusers_base
+class TrainUnet2dModel:
+    """A node that trains a unet2d model"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL", {}),
+                "dataset": ("HF_DATASET", {}),
+                "batch_size": ("INT", {"default": 1}),
+                "num_epochs": ("INT", {"default": 1}),
+                "learning_rate": ("FLOAT", {"default": 1e-4}),
+            },
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "train_unet2d_model"
+
+    def train_unet2d_model(self, model, dataset, batch_size, num_epochs, learning_rate):
+        from torch.utils.data import DataLoader
+        # import mse loss
+        from torch.nn import MSELoss
+        from torch.optim import Adam
+        from diffusers import UNet2DModel
+
+
+        model = model.train()
+        model = model.cuda()
+
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+        optimizer = Adam(model.parameters(), lr=learning_rate)
+        loss_fn = MSELoss()
+
+        for epoch in range(num_epochs):
+            for batch in dataloader:
+                batch = batch["image"]
+                batch = batch.cuda()
+                optimizer.zero_grad()
+                loss = loss_fn(model, batch)
+                loss.backward()
+                optimizer.step()
+                print(loss.item())
+
+        return (model,)
+

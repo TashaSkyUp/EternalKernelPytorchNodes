@@ -2207,7 +2207,7 @@ class FloodFillNode:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-    CATEGORY = "image processing"
+
 
     def __init__(self):
         self.num_workers = None  # Can be set to the number of processes to create
@@ -2263,6 +2263,125 @@ class FloodFillNode:
             images[i] = self.flood_fill(images[i], (start_x, start_y), target_color, replacement_color)
 
         return images
+
+@ETK_image_base
+class DecorateHeightMap:
+    """
+    Decorate a height map with input images at different heights specified by input list
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "height_map": ("IMAGE",),  # Expecting a NumPy array or tensor
+                "images": ("IMAGE",),  # Expecting a NumPy array or tensor
+                "heights": ("LIST", {"default": [0.5]}),
+                "feather": ("LIST", {"default": [0.05]}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+
+
+    def execute(self, height_map, images, heights, feather=0.05):
+        """
+        Args:
+            height_map: float values 0-1 1,h,w,3
+            images: z,x,y,c
+            heights: list of floats 0-1 length of z-1
+            feather: single float or a list of floats specifying the gradient width for feathering effect
+        Returns:
+            torch image 1,h,w,3
+        """
+        heights = heights.copy()
+        images = images[..., 0:3].clone()
+        height_map = height_map[..., 0:3].clone()
+
+        # Ensure heights is a list and add boundary values
+        heights = [0.0] + heights + [1.0]
+
+        # If feather is a single float, create a list of the same feather value for each transition
+        if isinstance(feather, float):
+            feather = [feather] * (len(heights) - 1)
+
+        # so the length of th feather list must be at least 1
+        # if there is one height then it should be length 1
+        # if there are two heights then it should be length 2
+        # if there are three heights then it should be length 3
+        # etc
+        if len(feather) != len(heights)-2:
+            raise ValueError("feather must be a single float or a list of floats of the same length as heights")
+
+
+        # Check for dimension match between height_map and images
+        if height_map.shape[1:3] != images.shape[1:3]:
+            raise ValueError("height_map and images must have the same height and width")
+
+        # Convert height map to 2D
+        height_map_2d = height_map.squeeze(0)[..., 0]
+
+        # Initialize output with the first texture
+        output = images[0].clone()
+        for i in range(1, len(heights) - 1):
+            current_feather = feather[i - 1]
+            # Calculate the mask for the current segment
+            mask = torch.sigmoid((height_map_2d - heights[i - 1]) / current_feather) * (
+                    1 - torch.sigmoid((height_map_2d - heights[i]) / current_feather))
+            mask = mask.unsqueeze(-1).repeat(1, 1, 3)  # Expand mask to match image dimensions
+
+            # Blend the output with the next texture using the mask
+            output = output * (1 - mask) + images[i] * mask
+
+        # Normalize the output to ensure it's within the valid range of [0, 1]
+        output = torch.clamp(output, 0, 1).unsqueeze(0)
+        return (output,)
+
+@ETK_image_base
+class RandomImageFromFolder:
+    """
+    Randomly select an image from a folder
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "folder": ("STRING",{"default": "./output"}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+
+
+    def execute(self, folder):
+        """
+        Args:
+            folder: string
+        Returns:
+            torch image 1,h,w,3
+        """
+        import random
+        # Get a list of all files in the folder
+        files = os.listdir(folder)
+
+        # Filter out non-image files
+        files = [f for f in files if f.endswith(".jpg") or f.endswith(".png")]
+
+        # Select a random file
+        file = random.choice(files)
+
+        # Load the image
+        image = Image.open(os.path.join(folder, file))
+
+        # Convert to torch tensor
+        image = torch.from_numpy(np.array(image)).float() / 255.0
+        image = image.unsqueeze(0)
+
+        return (image,)
+
 import torch
 
 

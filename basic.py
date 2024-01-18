@@ -23,6 +23,87 @@ class MultilineStringNode:
         return (Text,)
 
 
+class TupleNode:
+    """Node that displays a tuple"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "Tuple": ("STRING", {
+                    "default": "(None,None,)",
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("TUPLE",)
+    FUNCTION = "get_value"
+    CATEGORY = "text"
+
+    def get_value(self, Tuple):
+        # evaluate the string safely step by step
+        # type check
+        if not isinstance(Tuple, str):
+            raise TypeError("Tuple must be a string")
+
+        # format check
+        if not Tuple.startswith("(") or not Tuple.endswith(")"):
+            raise ValueError("Tuple must start with '(' and end with ')'")
+
+        # remove the brackets
+        Tuple = Tuple.strip("()")
+
+        # check for empty tuple
+        if len(Tuple) == 0:
+            return ((),)
+        # check for commas
+        if "," not in Tuple:
+            raise ValueError("Tuple must have at least one comma")
+
+        # split on commas
+        Tuple = Tuple.split(",")
+
+        # valid values are string,int,float,None, list,tuple,dict
+        # construct the tuple
+        ret = []
+        for val in Tuple:
+            val = val.strip()
+            if val == "None":
+                ret.append(None)
+            elif val.startswith("[") and val.endswith("]"):
+                # list
+                val = val.strip("[]")
+                val = val.split(",")
+                ret.append(val)
+            elif val.startswith("(") and val.endswith(")"):
+                # tuple
+                val = val.strip("()")
+                val = val.split(",")
+                ret.append(tuple(val))
+            elif val.startswith("{") and val.endswith("}"):
+                # dict
+                val = val.strip("{}")
+                val = val.split(",")
+                ret.append(dict(val))
+            elif val.startswith('"') and val.endswith('"'):
+                # string
+                ret.append(val.strip('"'))
+            elif "." in val:
+                # float
+                ret.append(float(val))
+            elif val == "":
+                # empty
+                pass
+            else:
+                # int
+                ret.append(int(val))
+
+        return (tuple(ret),)
+
+
 class StrBreakout:
     """ node that breaks out a string into a:
     - Boolean
@@ -45,14 +126,16 @@ class StrBreakout:
                 "Text": ("STRING", {
                     "default": "",
                 }),
+                "list_dtype": (["str", "int", "float", ],),
             }
         }
 
     RETURN_TYPES = ("STRING", "BOOL", "INT", "FLOAT", "LIST", "LIST", "LIST",)
+    RETURN_NAMES = ("Notes", "Bool", "Int", "Float", "List by chr", "list by lines", "list by commas",)
     FUNCTION = "get_value"
     CATEGORY = "text"
 
-    def get_value(self, Text):
+    def get_value(self, Text, list_dtype="str"):
         out_bool = False
         out_int = 0
         out_float = 0.0
@@ -95,6 +178,34 @@ class StrBreakout:
         except Exception as e:
             notes.append(f"split(',') failed: {e}")
             pass
+
+        if list_dtype == "int":
+            list_dtype = int
+        elif list_dtype == "float":
+            list_dtype = float
+        else:
+            list_dtype = str
+
+        try:
+            out_list = [list_dtype(val) for val in out_list]
+            notes.append(f"list dtype worked")
+        except Exception as e:
+            notes.append(f"list dtype failed: {e}")
+            pass
+        try:
+            out_lines = [list_dtype(val) for val in out_lines]
+            notes.append(f"splitlines dtype worked")
+        except Exception as e:
+            notes.append(f"splitlines dtype failed: {e}")
+            pass
+        try:
+            out_comma = [list_dtype(val) for val in out_comma]
+            notes.append(f"split(',') dtype worked")
+        except Exception as e:
+            notes.append(f"split(',') dtype failed: {e}")
+            pass
+
+
         return ("\n".join(notes), out_bool, out_int, out_float, out_list, out_lines, out_comma,)
 
 
@@ -308,3 +419,5 @@ NODE_CLASS_MAPPINGS["ValueToAny"] = ValueToAny
 NODE_CLASS_MAPPINGS["IterableToAny"] = IterableToAny
 NODE_CLASS_MAPPINGS["CallableToAny"] = CallableToAny
 NODE_CLASS_MAPPINGS["ObjectToAny"] = ObjectToAny
+
+NODE_CLASS_MAPPINGS["ETK_Tuple"] = TupleNode
