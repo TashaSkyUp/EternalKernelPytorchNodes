@@ -3,7 +3,7 @@ import shutil
 import copy
 import imageio_ffmpeg as ffmpeg
 import joblib
-from config import config_settings
+from .config import config_settings
 
 temp_dir = config_settings["tmp_dir"]
 NODE_CLASS_MAPPINGS = {}
