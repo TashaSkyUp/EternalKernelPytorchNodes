@@ -1,3 +1,4 @@
+# TODO: replace pyfastnoisesimd with pyfastnoiselite (works with rpi)
 import pyfastnoisesimd as fns
 
 

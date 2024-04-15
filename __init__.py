@@ -1,5 +1,6 @@
 import os
 import importlib
+
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 OLD_NODE_CLASS_MAPPINGS = {
@@ -33,12 +34,14 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 # Try importing optional dependencies
 
+import sys
 
-if os.getenv("UNIT_TEST", False):
+if os.getenv("UNIT_TEST", False) or 'pytest' in sys.modules:
     pass
 else:  # if not a unit test
     try:
         import comfy.samplers
+
         use_generic_nodes = False
     except ImportError:
         use_generic_nodes = True
@@ -53,7 +56,7 @@ else:  # if not a unit test
         if file.endswith(".py") and file[0] != "_":
             # import the NODE_CLASS_MAPPINGS from the file
             try:
-                module = importlib.import_module(f".{file[:-3]}",  __name__)
+                module = importlib.import_module(f".{file[:-3]}", __name__)
             except ImportError:
                 try:
                     module = importlib.import_module(f"{file[:-3]}")  # needed for testing?

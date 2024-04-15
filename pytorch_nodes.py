@@ -1186,6 +1186,7 @@ class SaveTorchTensor:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "save_torch_tensor"
+    OUTPUT_NODE = True
 
     def save_torch_tensor(self, tensor, file):
         import torch

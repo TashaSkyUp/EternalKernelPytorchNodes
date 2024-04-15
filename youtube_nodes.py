@@ -43,7 +43,8 @@ class YoutubeUploadNode:
         import sys
         my_python_exe = sys.executable
 
-        category = self.CATEGORY_NAMES.index(category)
+        category_idx = self.CATEGORY_NAMES.index(category)
+        category = self.VALID_CATEGORIES[category_idx]
 
         args = ["--file", file_path, "--category", str(category), "--title", title, "--description", description,
                 "--keywords", keywords, "--privacyStatus", privacy_status]

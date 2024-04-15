@@ -251,3 +251,27 @@ class TrainUnet2dModel:
 
         return (model,)
 
+# @ETK_HF_Diffusers_base
+# class LoadModelFromHF:
+#     """A node that loads the specified model from huggingface"""
+#
+#     @classmethod
+#     def INPUT_TYPES(cls):
+#         return {
+#             "required": {
+#                 "model_name": ("STRING", {"default": "johnowhitaker/ddpm-butterflies-32px"}),
+#             },
+#         }
+#
+#     RETURN_TYPES = ("TORCH_MODEL",)
+#     FUNCTION = "load_model_from_hf"
+#
+#     def load_model_from_hf(self, model_name):
+#         from huggingface_hub import hf_hub_url
+#         from diffusers import DDPMPipeline
+#         ret = DDPMPipeline.from_pretrained(model_name, device="cuda")
+#         return (ret,)
+
+
+
+

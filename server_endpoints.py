@@ -197,6 +197,12 @@ user_data = {
         "client_id": None,
         "git_io": "COTRF"
     },
+    "HMG": {
+        "password": "[REDACTED]",
+        "security": None,
+        "client_id": None,
+        "git_io": "HMG"
+    },
 }
 
 
@@ -409,6 +415,10 @@ def hijack_prompt_server(route_path,
                         return part1
                     if isinstance(part1, web.Request):
                         modified_func_response = await post_handler(part1)
+                    if isinstance(part1, dict):
+                        a = await post_handler(part1)
+                        b = part1
+                        return a
                     return modified_func_response
             elif after_post_func:
                 @PromptServer.instance.routes.post(path)
@@ -545,6 +555,9 @@ async def my_post_hijack_before(request: web.Request):
     ret = request
 
     print("client_id:", client_id)
+    if not isinstance(request, web.Request):
+        print("request is not a web.Request")
+        return request
 
     user = await get_user_if_client_id_logged_in(client_id)
     skp_lcl = config_settings["skip_login_for_local"]

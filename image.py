@@ -1,4 +1,5 @@
 import os
+
 import comfy
 
 try:
@@ -29,7 +30,8 @@ if testing:
             pass
 else:
     try:
-        from nodes import VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage
+        from nodes import VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, CLIPTextEncode, VAEDecode, \
+            VAEEncode, PreviewImage
         from nodes import CLIPTextEncode, VAEEncode, SaveImage
 
         from nodes import common_ksampler
@@ -54,9 +56,7 @@ except ImportError as e:
 import folder_paths
 import torch
 import torchvision
-import PIL.Image as Image
 import os
-import numpy as np
 import hashlib
 
 ### info for code completion AI ###
@@ -71,10 +71,22 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
+# def ETK_image_base(cls):
+#     # cls.FUNCTION = "func"
+#     cls.CATEGORY = "ETK/Image"
+#     NODE_CLASS_MAPPINGS[cls.__name__] = cls
+#     return cls
+
 def ETK_image_base(cls):
-    # cls.FUNCTION = "func"
     cls.CATEGORY = "ETK/Image"
+    # Add spaces to the camel case class name
+    pretty_name = cls.__name__
+    for i in range(1, len(pretty_name)):
+        if pretty_name[i].isupper():
+            pretty_name = pretty_name[:i] + " " + pretty_name[i:]
+    cls.DISPLAY_NAME = pretty_name
     NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    NODE_DISPLAY_NAME_MAPPINGS[cls.DISPLAY_NAME] = pretty_name
     return cls
 
 
@@ -173,10 +185,10 @@ class TinyTxtToImg:
 
     def __init__(self):
         print("ETK> TinyTxtToImg init")
-        import random
-        self.mdl = TinyTxtToImg.share_mdl
-        self.clp = TinyTxtToImg.share_clip
-        self.vae = TinyTxtToImg.share_vae
+        self.mdl = None
+        self.clp = None
+        self.vae = None
+
         self.vision = None
         self.steps = 10
         self.cfg = 8
@@ -210,8 +222,11 @@ class TinyTxtToImg:
                                     "default": "tinytxt2img"}
                          ),
                 "overrides": ("STRING", {"multiline": True,
-                                         "default": ""}),
-                "FUNC": ("FUNC",)
+                                         "default": '{"width":768,"height":768,"steps":20}'}),
+                "latent": ("LATENT",),
+                "pos_cond": ("CONDITIONING",),
+                "neg_cond": ("CONDITIONING",),
+                "image": ("IMAGE",),
             }
         }
 
@@ -221,19 +236,13 @@ class TinyTxtToImg:
     RETURN_NAMES = ("image", "FUNC", "latent", "positive", "negative",)
     FUNCTION = "tinytxt2img"
 
-
     def tinytxt2img(self, **kwargs):
         """ use the imports from nodes to generate an image from text """
-
+        import comfy.model_management as mm
         import random
         import json
         import gc
-
-        # Create a stream for computation
-        # gpu_stream = torch.cuda.Stream(device="cuda")
-        # cpu_stream = torch.Stream()
-
-        # kwargs = deepcopy(kwargs)
+        torch.cuda.empty_cache()
 
         unload_model = kwargs.get("unload_model", True)
         prompt = kwargs.get("prompt", "")
@@ -255,45 +264,37 @@ class TinyTxtToImg:
         self.denoise = kwargs.get("denoise", 1.0)
         self.steps = kwargs.get("steps", 10)
 
-        if not hasattr(TinyTxtToImg, "share_mdl"):
-            TinyTxtToImg.share_mdl = None
-            TinyTxtToImg.share_mdl_ckpt_name = None
+        self.mdl, self.clp, self.vae = \
+            CheckpointLoaderSimple.load_checkpoint(None,
+                                                   ckpt_name=ckpt_name
+                                                   )
+        # Check if an input image is provided
+        input_image = kwargs.get("image", None)
+        if input_image is not None:
+            # Encode the input image using the model's VAE
+            with torch.no_grad():
+                self.vae.device = torch.device("cuda:0")
+                self.vae.first_stage_model = self.vae.first_stage_model.to("cuda:0")
+                # self.vae.first_stage_model.decoder  = self.vae.first_stage_model.decoder.to("cuda:0")
+                # self.vae.first_stage_model = self.vae.first_stage_model.to("cuda:0")
+                input_image = input_image.to("cuda")
+                q = self.vae.encode(input_image)
+                self.latent_image = {"samples": q}
 
-        if TinyTxtToImg.share_mdl is None:
-            self.mdl, self.clp, self.vae = \
-                CheckpointLoaderSimple.load_checkpoint(None,
-                                                       ckpt_name=ckpt_name
-                                                       )
-            TinyTxtToImg.share_mdl_ckpt_name = ckpt_name
-            CSL = TinyTxtToImg
-            CSL.share_mdl = self.mdl
-            CSL.share_clip = self.clp
-            CSL.share_vae = self.vae
-            CSL.share_vision = self.vision
+        self.cfg = kwargs.get("cfg", 8)
 
-        else:
-            # check if the checkpoint is the same
-            if TinyTxtToImg.share_mdl_ckpt_name != ckpt_name:
-                self.mdl, self.clp, self.vae = \
-                    CheckpointLoaderSimple.load_checkpoint(None,
-                                                           ckpt_name=ckpt_name
-                                                           )
-                TinyTxtToImg.share_mdl_ckpt_name = ckpt_name
-                CSL = TinyTxtToImg
-                CSL.share_mdl = self.mdl
-                CSL.share_clip = self.clp
-                CSL.share_vae = self.vae
-                CSL.share_vision = self.vision
+        if not "sampler_name" in kwargs:
+            if "lcm" in ckpt_name.lower():
+                self.sampler_name = comfy.samplers.KSampler.SAMPLERS[18]
+                self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
             else:
+                self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
+                self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
+                self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
+        else:
+            self.sampler_name = kwargs.get("sampler_name", comfy.samplers.KSampler.SAMPLERS[0])
+            self.scheduler = kwargs.get("scheduler", comfy.samplers.KSampler.SCHEDULERS[0])
 
-                self.mdl, self.clp, self.vae = (TinyTxtToImg.share_mdl,
-                                                TinyTxtToImg.share_clip,
-                                                TinyTxtToImg.share_vae
-                                                )
-
-        self.cfg = 8
-        self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
-        self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
         self.positive = prompt
         self.negative = neg_prompt
         self.width = 512
@@ -338,15 +339,14 @@ class TinyTxtToImg:
                     print(e)
                     raise ValueError("advanced clip encoder failed")
             self.clp.cond_stage_model = self.clp.cond_stage_model.to("cpu")
-            import comfy.model_management as mm
 
             torch.cuda.empty_cache()
             gc.collect()
         if self.latent_image == None:
-            self.latent_image = EmptyLatentImage.generate(None, self.width, self.height, self.batch_size)[0]
+            self.latent_image = EmptyLatentImage().generate(self.width, self.height, self.batch_size)[0]
 
         if "latent" in render_what or "all" in render_what or "image" in render_what:
-            self.KSampler = KSampler()
+            self.KSampler = ETKKSampler()
             # self.mdl.offload_device = torch.device("cuda:0")
             # self.mdl.load_device = torch.device("cuda:0")
             self.samples = self.KSampler.sample(
@@ -403,7 +403,18 @@ class TinyTxtToImg:
                self.pos_cond,
                self.neg_cond
                ,)
-        # ret = deepcopy(ret)
+        if unload_model:
+            del self.mdl
+            del self.clp
+            del self.vae
+            if "vision" in self.__dict__:
+                del self.vision
+            del self.samples
+            del self.FUNC
+            del self.ARGS
+            mm.free_memory(mm.get_total_memory(mm.get_torch_device()), mm.get_torch_device())
+            torch.cuda.empty_cache()
+            gc.collect()
         return ret
 
 
@@ -1334,7 +1345,6 @@ class StackImages:
     def stackme(self, image1, image2=None, number_of_images=2, mode="all", number_of_repeats=1):
         # import modules to help clear memory
         import gc
-        import torch
         import torch.cuda
 
         """
@@ -1502,7 +1512,7 @@ class KSamplerCreateDataset:
 
     @classmethod
     def INPUT_TYPES(cls):
-        inps = KSampler.INPUT_TYPES()
+        inps = ETKKSampler.INPUT_TYPES()
         # make sure to set a default
         inps["required"]["dataset_name"] = ("STRING", {"default": "dataset"})
         return inps
@@ -1532,7 +1542,7 @@ class KSamplerCreateDataset:
         :return:
         """
         # create the sampler
-        sampler = KSampler()
+        sampler = ETKKSampler()
 
         x = {"model": model, "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": sampler_name,
              "scheduler": scheduler, "positive": positive, "negative": negative, "latent_image": latent_image,
@@ -1563,22 +1573,13 @@ class KSamplerCreateDataset:
 
 
 @ETK_image_base
-class KSampler:
+class ETKKSampler:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required":
-                    {"model": ("MODEL",),
-                     "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
-                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
-                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                     "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
-                     "positive": ("CONDITIONING",),
-                     "negative": ("CONDITIONING",),
-                     "latent_image": ("LATENT",),
-                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                     "one_seed_per_batch": ([True, False], {"default": False}),
-                     }}
+        from nodes import KSampler
+        ret = KSampler.INPUT_TYPES()
+        ret["required"]["one_seed_per_batch"] = ([True, False], {"default": False})
+        return ret
 
     RETURN_TYPES = ("LATENT", "FUNC",)
     FUNCTION = "sample"
@@ -1587,7 +1588,7 @@ class KSampler:
 
     def sample(self, **kwargs):
 
-        kwargs = deepcopy(kwargs)
+        # kwargs = deepcopy(kwargs)
 
         model = kwargs.get("model", None)
         seed = kwargs.get("seed", None)
@@ -1601,8 +1602,8 @@ class KSampler:
         denoise = kwargs.get("denoise", None)
         one_seed_per_batch = kwargs.get("one_seed_per_batch", None)
 
-        self.FUNC = lambda x: KSampler.sample(self, **x)
-        self.ARGS = kwargs
+        # self.FUNC = lambda x: ETKKSampler.sample(self, **x)
+        # self.ARGS = kwargs
 
         try:
             ret = common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
@@ -1610,11 +1611,319 @@ class KSampler:
         except TypeError as e:
             ret = common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise)
+        except RuntimeError as e:
+            raise e
         ret = (ret[0], self,)
         return ret
 
 
-from PIL import Image, ImageDraw, ImageFont
+@ETK_image_base
+class ListKSampler:
+    """
+    A KSampler that takes a list for every input, if the list has one element it will be repeated for every sample
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        s1 = ETKKSampler.INPUT_TYPES()["required"]["sampler_name"]
+        s2 = ETKKSampler.INPUT_TYPES()["required"]["scheduler"]
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "seed": ("LIST",),
+                "steps": ("LIST",),
+                "cfg": ("LIST",),
+                "sampler_name": s1,
+                "scheduler": s2,
+                "positive": ("LIST",),
+                "negative": ("LIST",),
+                "latent_image": ("LIST",),
+                "denoise": ("LIST",),
+                "one_seed_per_batch": ("LIST",),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "sample"
+
+    CATEGORY = "sampling"
+
+    def sample(self, **kwargs):
+        import torch
+        # figure out how many samples we need to generate
+        num_samples = 1
+        for key in kwargs:
+            if key == "model":
+                continue
+            elif key == "sampler_name" or key == "scheduler":
+                continue
+            if kwargs[key] is not None:
+                num_samples = max(num_samples, len(kwargs[key]))
+
+        # create a list of dictionaries
+        samples = []
+        for i in range(num_samples):
+            sample = {}
+            for key in kwargs:
+                if not isinstance(kwargs[key], list) and key != "model":
+                    kwargs[key] = [kwargs[key]]
+                if key == "model":
+                    sample[key] = kwargs[key]
+                elif kwargs[key] is None:
+                    sample[key] = None
+                elif len(kwargs[key]) == 1:
+                    sample[key] = kwargs[key][0]
+                else:
+                    sample[key] = kwargs[key][i]
+            samples.append(sample)
+
+        # create a list of results
+        results = []
+        local_ksampler = ETKKSampler()
+        for sample in samples:
+            results.append(local_ksampler.sample(**sample)[0])
+        torch.cuda.empty_cache()
+
+        return (results,)
+
+
+@ETK_image_base
+class ListCLIPTextEncode:
+    """
+    A CLIPTextEncode that takes a list for every input, if the list has one element it will be repeated for every sample
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("LIST",),
+                "clip": ("LIST",),
+
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "encode"
+
+    CATEGORY = "CLIP"
+
+    def encode(self, **kwargs):
+        # figure out how many samples we need to generate
+        num_samples = 1
+        for key in kwargs:
+            num_samples = max(num_samples, len(kwargs[key]))
+
+        # create a list of dictionaries
+        samples = []
+        for i in range(num_samples):
+            sample = {}
+            for key in kwargs:
+                if len(kwargs[key]) == 1:
+                    sample[key] = kwargs[key][0]
+                else:
+                    sample[key] = kwargs[key][i]
+            samples.append(sample)
+
+        # create a list of results
+        results = []
+        for sample in samples:
+            results.append(CLIPTextEncode().encode(**sample)[0])
+
+        return (results,)
+
+
+@ETK_image_base
+class ListVAEDecode:
+    """
+    A VAEDecode that takes a list for every input, if the list has one element it will be repeated for every sample
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LIST",),
+
+            },
+            "optional": {
+                "vae_list": ("LIST",),
+                "vae": ("VAE",),
+
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "decode"
+
+    CATEGORY = "VAE"
+
+    def decode(self, **kwargs):
+        # figure out if we are using the list of vae or just one
+        if kwargs.get("vae_list") is None:
+            kwargs["vae"] = [kwargs.get("vae")]
+        else:
+            kwargs["vae"] = kwargs.pop("vae_list")
+
+        if "vae_list" in kwargs:
+            kwargs.pop("vae_list")
+
+        # figure out how many samples we need to generate
+        num_samples = 1
+        for key in kwargs:
+            num_samples = max(num_samples, len(kwargs[key]))
+
+        # create a list of dictionaries
+        samples = []
+        for i in range(num_samples):
+            sample = {}
+            for key in kwargs:
+                if len(kwargs[key]) == 1:
+                    sample[key] = kwargs[key][0]
+                else:
+                    sample[key] = kwargs[key][i]
+            samples.append(sample)
+
+        # create a list of results
+        results = []
+        for sample in samples:
+            sample["samples"] = sample.pop("latent")
+            results.append(VAEDecode().decode(**sample)[0])
+
+        return (results,)
+
+
+@ETK_image_base
+class ListVAEEncode:
+    """
+    A VAEEncode that takes a list for every input, if the list has one element it will be repeated for every sample
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("LIST",),
+
+            },
+            "optional": {
+                "vae_list": ("LIST",),
+                "vae": ("VAE",),
+
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "encode"
+
+    CATEGORY = "VAE"
+
+    def encode(self, **kwargs):
+        if kwargs.get("vae_list", None) is None:
+            kwargs["vae"] = [kwargs.get("vae")]
+        else:
+            kwargs["vae"] = kwargs.pop("vae_list")
+
+        if "vae_list" in kwargs:
+            kwargs.pop("vae_list")
+
+        # figure out how many samples we need to generate
+        num_samples = 1
+        for key in kwargs:
+            num_samples = max(num_samples, len(kwargs[key]))
+
+        # create a list of dictionaries
+        samples = []
+        for i in range(num_samples):
+            sample = {}
+            for key in kwargs:
+                if len(kwargs[key]) == 1:
+                    sample[key] = kwargs[key][0]
+                else:
+                    sample[key] = kwargs[key][i]
+            samples.append(sample)
+
+        # create a list of results
+        results = []
+        for sample in samples:
+            results.append(VAEEncode().encode(**sample)[0])
+
+        return (results,)
+
+
+@ETK_image_base
+class ImageFromListIdx:
+    """
+    A node that takes a list of images and an index and returns the image at that index
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("LIST", {"default": []}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 10e10}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "get_image"
+
+    CATEGORY = "ETK/image"
+
+    def get_image(self, images, index):
+        return (images[index],)
+
+
+@ETK_image_base
+class LatentFromListIdx:
+    """
+    A node that takes a list of latents and an index and returns the latent at that index
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latents": ("LIST", {"default": []}),
+                "index": ("INT", {"default": 0, "min": -10e10, "max": 10e10}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "get_latent"
+
+    CATEGORY = "ETK/latent"
+
+    def get_latent(self, latents, index):
+        return (latents[index],)
+
+
+@ETK_image_base
+class ListifyAnything:
+    """
+    A node that takes anything and returns it in a list
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "anything": ("*",),
+                "repeat": ("INT", {"default": 1, "min": 1, "max": 100}),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "listify"
+
+    CATEGORY = "ETK/other"
+
+    def listify(self, anything, repeat):
+        return ([anything] * repeat,)
+
+
+from PIL import Image
 import torch
 import numpy as np
 
@@ -1670,13 +1979,16 @@ class TextRender:
                 "func_only": ([True, False], {"default": False}),
                 "stroke fill": ("STRING", {"default": "#000000"}),
                 "stroke width": ("INT", {"default": 1, "min": 1, "max": 100, "step": 1}),
+            },
+            "optional": {
+                "font_override": ("STRING", {"default": None}),
             }
         }
 
     CATEGORY = "ETK/text"
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "FUNC",)
-    RETURN_NAMES = ("image", "image rgba", "FUNC(**kwargs)",)
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING",)
+    RETURN_NAMES = ("image", "image rgba", "possible_fonts",)
 
     FUNCTION = "render_text"
 
@@ -1687,11 +1999,14 @@ class TextRender:
         The text is rendered in the provided font, size, and color.
         """
         from PIL import ImageFont, ImageDraw
-        import gc
         import psutil
         process = psutil.Process();
         memory_info = process.memory_info();
         start_memory = memory_info.rss / (1024 * 1024)
+        font_override = kwargs.get("font_override", None)
+
+        if font_override:
+            font = font_override
 
         sw = kwargs.get("stroke width", None)
         sf = kwargs.get("stroke fill", None)
@@ -1758,7 +2073,9 @@ class TextRender:
                                                         size,
                                                         wrapped_line, x, y_offset + line_spacing,
                                                         allow_wrap=False,
-                                                        allow_shrink=False)
+                                                        allow_shrink=False,
+                                                        sf=sf,
+                                                        sw=sw)
                                 continue  # Skip to the next line
 
                         if allow_wrap:
@@ -1771,7 +2088,9 @@ class TextRender:
                                                     x,
                                                     y_offset + line_spacing,
                                                     allow_wrap=False,
-                                                    allow_shrink=False)
+                                                    allow_shrink=False,
+                                                    sf=sf,
+                                                    sw=sw)
                             continue  # Skip to the next line
 
                     # Draw the line
@@ -1823,10 +2142,10 @@ class TextRender:
         image_tensor = torch.from_numpy(image_array).unsqueeze(0).float() / 255.0
 
         # set the alpha to the first channel to make a mask
-        image_tensor[..., 3] = image_tensor[..., 0]
+        image_tensor[..., 3] = image_tensor[..., 0].to("cpu")
 
         # now set the text to the correct color
-        color_arr = torch.zeros(1, 1, 1, 3)
+        color_arr = torch.zeros(1, 1, 1, 3).to("cpu")
         color_arr[0, 0, 0, 0] = int(color[1:3], 16) / 255.0
         color_arr[0, 0, 0, 1] = int(color[3:5], 16) / 255.0
         color_arr[0, 0, 0, 2] = int(color[5:7], 16) / 255.0
@@ -1847,7 +2166,8 @@ class TextRender:
 
         image_rgb = image_rgb.to("cpu")
         image_tensor = image_tensor.to("cpu")
-        return (image_rgb, image_tensor, None,)
+        list_of_possible_fonts_str = "\n".join(get_fonts())
+        return (image_rgb, image_tensor, list_of_possible_fonts_str,)
 
 
 @ETK_image_base
@@ -1904,7 +2224,7 @@ class FuncImageStackToImageStack:
         my_locals = locals()
 
         image_x = kwargs.get("image", None)
-        #gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
+        # gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
 
         my_locals["x"] = func
         my_locals["x_image"] = kwargs.get("image", None)
@@ -2048,7 +2368,6 @@ class ImageStackAndMatch:
 MAX_RESOLUTION = 4096
 
 
-# Define the ComfyUI node class for text detection using CRNN model from Torch Hub
 @ETK_image_base
 class TextInImage:
 
@@ -2058,38 +2377,51 @@ class TextInImage:
             "required": {
                 "image": ("IMAGE",),
                 "scale_factor": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1}),
-            }
+            },
         }
 
     RETURN_TYPES = ("STRING",)
-    FUNCTION = "detect_text"
+    FUNCTION = "detect_text_batch"
 
     CATEGORY = "OCR"
 
+    def detect_text_batch(self, image, scale_factor):
+        # calls the detect_text function for each image in the batch
+        results = []
+        for i in range(image.shape[0]):
+            results.append(self.detect_text(image[i].unsqueeze(0), scale_factor)[0])
+
+        results = '\n\n'.join(results)
+        return (results,)
+
     def detect_text(self, image, scale_factor):
-        import torch
-        from torchvision import transforms
-        # the incoming tensor in image is in the format (batch, height, width, channels)
-        # we need to convert it to (batch, channels, height, width)
+        from .config import config_settings
+        tesse = config_settings.get("tesseract_location", None)
+        if tesse is None:
+            raise Exception("Tesseract location not set in config")
 
+        import pytesseract
+        import cv2
+        import numpy as np
+        pytesseract.pytesseract.tesseract_cmd = tesse
+
+        # incomming tensor is (B, H, W, C) so convert it
         image = image.permute(0, 3, 1, 2)
-        new_size = list(image.shape)
-        new_size[2] = int(new_size[2] * scale_factor)
-        new_size[3] = int(new_size[3] * scale_factor)
-        new_size = tuple(new_size[2:])
 
-        rescaled_image = torch.nn.functional.interpolate(image, size=new_size, mode='bilinear')
-        # convert to PIL image
+        # Convert the image to a numpy array
+        image = image[0].cpu().numpy()
+        image = np.transpose(image, (1, 2, 0))
+        image = (image * 255).astype(np.uint8)
 
-        pil_image = transforms.ToPILImage()(rescaled_image.squeeze(0))
-        # Load CRNN model from Torch Hub
-        # Use a pipeline as a high-level helper
+        # Resize the image
+        height, width, _ = image.shape
+        image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
 
-        from transformers import pipeline
+        # Convert the image to grayscale
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        pipe = pipeline("image-to-text", model="microsoft/trocr-large-printed")
-
-        detected_text = pipe.predict(pil_image)[0]["generated_text"]
+        # Perform OCR on the image
+        detected_text = pytesseract.image_to_string(gray)
 
         return (detected_text,)
 
@@ -2166,7 +2498,6 @@ class TileImage:
 
     def tile_image(self, image):
         import torch
-        import torch.nn.functional as F
 
         # image is already B,H,W,C
 
@@ -2184,8 +2515,6 @@ class TileImage:
         # now the image shape is B,3H,3W,5
 
         return (image,)
-
-
 
 
 @ETK_image_base
@@ -2207,7 +2536,6 @@ class FloodFillNode:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-
 
     def __init__(self):
         self.num_workers = None  # Can be set to the number of processes to create
@@ -2264,6 +2592,7 @@ class FloodFillNode:
 
         return images
 
+
 @ETK_image_base
 class DecorateHeightMap:
     """
@@ -2283,7 +2612,6 @@ class DecorateHeightMap:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-
 
     def execute(self, height_map, images, heights, feather=0.05):
         """
@@ -2311,9 +2639,8 @@ class DecorateHeightMap:
         # if there are two heights then it should be length 2
         # if there are three heights then it should be length 3
         # etc
-        if len(feather) != len(heights)-2:
+        if len(feather) != len(heights) - 2:
             raise ValueError("feather must be a single float or a list of floats of the same length as heights")
-
 
         # Check for dimension match between height_map and images
         if height_map.shape[1:3] != images.shape[1:3]:
@@ -2338,6 +2665,7 @@ class DecorateHeightMap:
         output = torch.clamp(output, 0, 1).unsqueeze(0)
         return (output,)
 
+
 @ETK_image_base
 class RandomImageFromFolder:
     """
@@ -2348,13 +2676,12 @@ class RandomImageFromFolder:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "folder": ("STRING",{"default": "./output"}),
+                "folder": ("STRING", {"default": "./output"}),
             }
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-
 
     def execute(self, folder):
         """
@@ -2382,8 +2709,347 @@ class RandomImageFromFolder:
 
         return (image,)
 
-import torch
 
+@ETK_image_base
+class ZoomInImage:
+    """
+    Zoom in on an image by a specified factor and center point
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "zoom_factor": ("FLOAT", {"default": 2.0, "min": .01, "max": 1000.0, "step": 0.1}),
+                "center_x": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "center_y": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "interpolation": (["nearest", "bilinear", "bicubic", "area"], {"default": "bilinear"}),
+                "keep_size": (["True", "False"], {"default": "True"}),
+                "animate": ("BOOLEAN", {"default": False}),
+                "exponential_zoom": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "zoom_in"
+
+    CATEGORY = "ETK/image"
+
+    def zoom_in(self, image, zoom_factor, center_x, center_y, interpolation, keep_size, animate, exponential_zoom):
+        batch_size, height, width, channels = image.shape
+        frames = []
+
+        for frame in range(batch_size):
+            percent_done = frame / batch_size
+            if exponential_zoom:
+                percent_done = percent_done ** 2
+
+            # Calculate the zoom factor for this image
+            frame_zoom_factor = 1 + (zoom_factor * percent_done)
+
+            # Calculate the new dimensions after zooming
+            new_height = int(height / frame_zoom_factor)
+            new_width = int(width / frame_zoom_factor)
+
+            # Calculate the coordinates of the top-left corner of the zoomed region
+            top = int((height - new_height) * center_y)
+            left = int((width - new_width) * center_x)
+
+            # Extract the zoomed region from the image
+            zoomed_image = image[frame, top:top + new_height, left:left + new_width, :].unsqueeze(0)
+
+            if keep_size == "True":
+                # change order of dims for interpolation
+                zoomed_image = zoomed_image.permute(0, 3, 1, 2)
+                # Resize the zoomed region back to the original dimensions
+                zoomed_image = torch.nn.functional.interpolate(zoomed_image, size=(height, width), mode=interpolation,
+                                                               align_corners=False)
+                # change order of dims back
+                zoomed_image = zoomed_image.permute(0, 2, 3, 1)
+
+            frames.append(zoomed_image)
+
+        # Stack all frames into a 4D tensor
+        frames = torch.cat(frames, dim=0)
+
+        return (frames,)
+
+
+@ETK_image_base
+class ListUpscaleLatentBy:
+    """uses from nodes import LatentUpscaleBy"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        from nodes import LatentUpscaleBy
+        tmp = LatentUpscaleBy.INPUT_TYPES()["required"]["upscale_method"]
+        return {
+            "required": {
+                "latents": ("LIST", {"default": None}),
+                "upscale_method": tmp,
+
+            },
+            "optional": {
+                "factors": ("LIST", {"default": None}),
+                "factor": ("FLOAT", {"default": 1.5, "min": 0.0, }),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "upscale"
+
+    CATEGORY = "latent"
+
+    def upscale(self, latents, upscale_method, factors=None, factor=1.5):
+        from nodes import LatentUpscaleBy
+
+        if not factors:
+            factors = [factor] * len(latents)
+
+        # Check if latents and factors have the same length
+        if len(latents) != len(factors):
+            raise ValueError("Latents and factors must have the same length")
+
+        # Apply LatentUpscaleBy to each pair of latent and factor
+        upscaled_latents = [LatentUpscaleBy().upscale(latent, upscale_method, factor)[0] for latent, factor in
+                            zip(latents, factors)]
+
+        return (upscaled_latents,)
+
+
+@ETK_image_base
+class SBSImage:
+    """
+    Combine two images side by side
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image1": ("IMAGE",),
+                "image2": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+
+    CATEGORY = "ETK/image"
+
+    def execute(self, image1, image2):
+        """
+        Args:
+            image1: torch image b,h,w,3
+            image2: torch image b,h,w,3
+        Returns:
+            torch image 1,h,w,3
+        """
+
+        # Check if the images have the same height
+        if image1.shape[1] != image2.shape[1]:
+            raise ValueError("Images must have the same height")
+
+        # Check if the images have the same number of channels
+        if image1.shape[3] != image2.shape[3]:
+            raise ValueError("Images must have the same number of channels")
+
+        # Stack the images horizontally
+        output = torch.cat([image1, image2], dim=2)
+
+        return (output,)
+
+
+@ETK_image_base
+class TTBImage:
+    """
+    Combine two images top to bottom
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image1": ("IMAGE",),
+                "image2": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+
+    CATEGORY = "ETK/image"
+
+    def execute(self, image1, image2):
+        """
+        Args:
+            image1: torch image b,h,w,3
+            image2: torch image b,h,w,3
+        Returns:
+            torch image 1,h,w,3
+        """
+
+        # Check if the images have the same width
+        if image1.shape[2] != image2.shape[2]:
+            raise ValueError("Images must have the same width")
+
+        # Check if the images have the same number of channels
+        if image1.shape[3] != image2.shape[3]:
+            raise ValueError("Images must have the same number of channels")
+
+        # Stack the images vertically
+        output = torch.cat([image1, image2], dim=1)
+
+        return (output,)
+
+
+@ETK_image_base
+class ImageGrid:
+    """
+    Combine multiple images into a grid
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "rows": ("INT", {"default": 2, "min": 1}),
+                "cols": ("INT", {"default": 2, "min": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "execute"
+
+    CATEGORY = "ETK/image"
+
+    def get_img_idx(self, row, col, rows, cols):
+        return row * cols + col
+
+    def get_xy_for_idx(self, idx, rows, cols):
+        row = idx % cols
+        col = idx // cols
+        return row, col
+
+    def execute(self, image, rows, cols):
+        # TODO: update this to handle a time series.
+        """
+        Args:
+            image: image (r*c),h,w,3
+            rows: int
+            cols: int
+        Returns:
+            torch image 1,h*r,w*c,3
+
+        """
+
+        # Check if the number of images is equal to the number of rows times the number of columns
+        if len(image) != rows * cols:
+            raise ValueError("Number of images must be equal to rows * cols")
+
+        # check if each row has the same hiegth for each image
+        for row in range(rows):
+            row_idxs = [self.get_img_idx(row, col, rows, cols) for col in range(cols)]
+            heights = [image[idx].shape[1] for idx in row_idxs]
+            if not all(height == heights[0] for height in heights):
+                raise ValueError("Images in the same row must have the same height")
+
+        # check if all columns of images have the same width
+        for col in range(cols):
+            col_idxs = [self.get_img_idx(row, col, rows, cols) for row in range(rows)]
+            widths = [image[idx].shape[2] for idx in col_idxs]
+            if not all(width == widths[0] for width in widths):
+                raise ValueError("Images in the same column must have the same width")
+
+        col_widths = []
+        for column in range(cols):
+            idx = self.get_img_idx(0, column, rows, cols)
+            col_width = image[idx].shape[1]
+            col_widths.append(col_width)
+
+        col_heights = []
+        for row in range(rows):
+            idx = self.get_img_idx(row, 0, rows, cols)
+            col_height = image[idx].shape[0]
+            col_heights.append(col_height)
+
+        col_y_pix = [int(sum(col_heights[:i])) for i in range(len(col_heights))]
+        col_x_pix = [int(sum(col_widths[:i])) for i in range(len(col_widths))]
+
+        total_height = 0
+        for row in range(rows):
+            total_height += image[self.get_img_idx(row, 0, rows, cols)].shape[0]
+
+        total_width = 0
+        for col in range(cols):
+            total_width += image[self.get_img_idx(0, col, rows, cols)].shape[1]
+
+        out_tensor = torch.zeros((1, total_height, total_width, image.shape[3]), dtype=image.dtype,
+                                 device=image.device)
+
+        for idx in range(len(image)):
+            x, y = self.get_xy_for_idx(idx, rows, cols)
+            x_pix = col_x_pix[x]
+            y_pix = col_y_pix[y]
+            h, w, _ = image[idx].shape
+            out_tensor[0, y_pix:y_pix + h, x_pix:x_pix + w, :] = image[idx]
+
+        image.to("cpu")
+        del image
+        torch.cuda.empty_cache()
+
+        return (out_tensor,)
+
+
+@ETK_image_base
+class QueryImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True}),
+                "image": ("IMAGE",)
+            }
+        }
+
+    FUNCTION = "execute"
+
+    CATEGORY = "image_to_text"
+    RETURN_TYPES = ("STRING",)
+
+    def execute(self, prompt, image):
+        from .modules.agent_commands import query_image
+        result = query_image.execute({"prompt": prompt, "image": image})
+
+        return (result["result"],)
+
+
+from typing import Tuple
+
+
+@ETK_image_base
+class PreviewImagePassThrough(PreviewImage):
+    @classmethod
+    def INPUT_TYPES(s):
+        # get the input types from the parent class
+        input_types = super().INPUT_TYPES()
+
+        return input_types
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "pass_through"
+
+    def pass_through(self, **kwargs):
+        images = kwargs.pop("images", None)
+        # first call the parent class's save_image method
+        result = super().save_images(images, **kwargs)
+        result["result"] = (images,)
+        return result
+
+
+import torch
 
 if __name__ == "__main__":
     # test TextRender

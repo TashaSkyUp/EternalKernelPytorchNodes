@@ -22,6 +22,7 @@ def ETK_functional_base(cls):
     NODE_CLASS_MAPPINGS[cls.__name__] = cls
     return cls
 
+
 def new_exec(c, g, l):
     global old_exec
     import os
@@ -35,6 +36,7 @@ def new_exec(c, g, l):
     old_exec(c, g, l)
 
     return locals
+
 
 old_exec = exec
 exec = new_exec
@@ -336,7 +338,7 @@ class FuncListToList:
 
         exec(code, my_globals, my_locals)
 
-        return (my_locals["y_list"],)
+        return (my_locals["y"],)
 
 
 @ETK_functional_base
@@ -390,7 +392,7 @@ class FuncStrToList:
 
         exec(code, my_globals, my_locals)
 
-        return (my_locals["y_list"],)
+        return (my_locals["y"],)
 
 
 @ETK_functional_base
@@ -483,14 +485,16 @@ class FuncAnysToImage:
     FUNCTION = "func"
 
     def func(self, **kwargs):
+        import gc
+        import torch
         code = kwargs.get("code", None)
         any1 = kwargs.get("any1", None)
         any2 = kwargs.get("any2", None)
         any3 = kwargs.get("any3", None)
         any4 = kwargs.get("any4", None)
 
-        my_globals = globals()
-        my_locals = locals()
+        my_globals = globals().copy()
+        my_locals = {}
 
         my_locals["any1"] = any1
         my_locals["any2"] = any2
@@ -499,11 +503,21 @@ class FuncAnysToImage:
 
         exec(code, my_globals, my_locals)
         if "y" in my_locals.keys():
-            return (my_locals["y"],)
+            y = my_locals["y"]
         elif "y" in my_globals.keys():
-            return (my_globals["y"],)
+            y = my_globals["y"]
         else:
-            return (None,)
+            y = None
+
+        del my_locals
+        del my_globals
+        del code
+        del any1, any2, any3, any4
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        return (y,)
+
 
 @ETK_functional_base
 class FuncAnysToLatent:
@@ -552,6 +566,7 @@ class FuncAnysToLatent:
         else:
             return (None,)
 
+
 @ETK_functional_base
 class FuncAnysToString:
     """runs eval on the given text, with 5 anys as input and outputs a string"""
@@ -599,6 +614,7 @@ class FuncAnysToString:
         else:
             return (None,)
 
+
 @ETK_functional_base
 class FuncAnysToList:
     """runs eval on the given text, with 5 anys as input and outputs a list"""
@@ -631,7 +647,7 @@ class FuncAnysToList:
         any4 = kwargs.get("any4", None)
 
         my_globals = globals()
-        my_locals = locals()
+        my_locals = {}
 
         my_locals["any1"] = any1
         my_locals["any2"] = any2
@@ -645,6 +661,61 @@ class FuncAnysToList:
             return (my_globals["y"],)
         else:
             return (None,)
+
+
+@ETK_functional_base
+class FuncAnysToCond:
+    """runs eval on the given text, with 5 anys as input and outputs a cond"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = optional(
+            both(
+                both({"any1": ("*", {"default": None})}, {"any2": ("*", {"default": None})}),
+                both({"any3": ("*", {"default": None})}, {"any4": ("*", {"default": None})})
+            ),
+        )
+        req["required"] = {}
+        req["required"].update(_text)
+
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        import gc
+        code = kwargs.get("code", None)
+        any1 = kwargs.get("any1", None)
+        any2 = kwargs.get("any2", None)
+        any3 = kwargs.get("any3", None)
+        any4 = kwargs.get("any4", None)
+
+        my_globals = globals()
+        my_locals = {}
+
+        my_locals["any1"] = any1
+        my_locals["any2"] = any2
+        my_locals["any3"] = any3
+        my_locals["any4"] = any4
+
+        exec(code, my_globals, my_locals)
+        if "y" in my_locals.keys():
+            y = (my_locals["y"],)
+        elif "y" in my_globals.keys():
+            y = my_globals["y"],
+        else:
+            y = (None,)
+        del my_locals
+        gc.collect()
+
+        return (y,)
+
+
 if __name__ == "__main__":
     test = {}
 
