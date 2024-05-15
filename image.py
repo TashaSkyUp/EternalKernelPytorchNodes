@@ -250,7 +250,12 @@ class TinyTxtToImg:
         clip_encoder = kwargs.get("clip_encoder", "comfy -ignore below")
         token_normalization = kwargs.get("token_normalization", "length+mean")
         weight_interpretation = kwargs.get("weight_interpretation", "comfy++")
-        ckpt_name = kwargs.get("ckpt_name", "v1-5-pruned-emaonly.safetensors")
+        ckpt_name = kwargs.get("ckpt_name", None)
+
+        model_ref = kwargs.get("model", None)
+        vae = kwargs.get("vae", None)
+        clip = kwargs.get("clip", None)
+
         overrides = kwargs.get("overrides", "")
         name = kwargs.get("name", "tinytxt2img")
         FUNC = kwargs.get("FUNC", None)
@@ -264,10 +269,15 @@ class TinyTxtToImg:
         self.denoise = kwargs.get("denoise", 1.0)
         self.steps = kwargs.get("steps", 10)
 
-        self.mdl, self.clp, self.vae = \
-            CheckpointLoaderSimple.load_checkpoint(None,
-                                                   ckpt_name=ckpt_name
-                                                   )
+        if model_ref and vae and clip:
+            self.mdl = model_ref
+            self.vae = vae
+            self.clp = clip
+        else:
+            self.mdl, self.clp, self.vae = \
+                CheckpointLoaderSimple.load_checkpoint(None,
+                                                       ckpt_name=ckpt_name
+                                                       )
         # Check if an input image is provided
         input_image = kwargs.get("image", None)
         if input_image is not None:
@@ -283,7 +293,7 @@ class TinyTxtToImg:
 
         self.cfg = kwargs.get("cfg", 8)
 
-        if not "sampler_name" in kwargs:
+        if not "sampler_name" in kwargs and ckpt_name:
             if "lcm" in ckpt_name.lower():
                 self.sampler_name = comfy.samplers.KSampler.SAMPLERS[18]
                 self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
@@ -412,6 +422,9 @@ class TinyTxtToImg:
             del self.samples
             del self.FUNC
             del self.ARGS
+            del self.pos_cond
+            del self.neg_cond
+            del self.KSampler
             mm.free_memory(mm.get_total_memory(mm.get_torch_device()), mm.get_torch_device())
             torch.cuda.empty_cache()
             gc.collect()
@@ -1987,8 +2000,8 @@ class TextRender:
 
     CATEGORY = "ETK/text"
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING",)
-    RETURN_NAMES = ("image", "image rgba", "possible_fonts",)
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "FUNC",)
+    RETURN_NAMES = ("image", "image rgba", "possible_fonts", "FUNC",)
 
     FUNCTION = "render_text"
 
@@ -2124,9 +2137,9 @@ class TextRender:
                 if "height" not in new_kwargs:
                     new_kwargs["height"] = height
 
-                return TextRender.render_text(None, **new_kwargs)
+                return TextRender().render_text(**new_kwargs)
 
-            return (None, None, lll,)
+            return (None, None, None, lll,)
 
         font_name = kwargs.get("font_name", font)
 
@@ -2934,7 +2947,6 @@ class ImageGrid:
         return row, col
 
     def execute(self, image, rows, cols):
-        # TODO: update this to handle a time series.
         """
         Args:
             image: image (r*c),h,w,3
@@ -2942,21 +2954,27 @@ class ImageGrid:
             cols: int
         Returns:
             torch image 1,h*r,w*c,3
-
         """
 
         # Check if the number of images is equal to the number of rows times the number of columns
-        if len(image) != rows * cols:
-            raise ValueError("Number of images must be equal to rows * cols")
+        num_images = rows * cols
+        if len(image) < num_images:
+            # Calculate how many noise images are needed
+            num_noise_images = num_images - len(image)
+            # Create the required number of noise images
+            noise_shape = image[0].shape
+            noise_images = torch.randn((num_noise_images,) + noise_shape, dtype=image.dtype, device=image.device)
+            # Concatenate the noise images to the original images
+            image = torch.cat((image, noise_images), dim=0)
 
-        # check if each row has the same hiegth for each image
+        # Check if each row has the same height for each image
         for row in range(rows):
             row_idxs = [self.get_img_idx(row, col, rows, cols) for col in range(cols)]
             heights = [image[idx].shape[1] for idx in row_idxs]
             if not all(height == heights[0] for height in heights):
                 raise ValueError("Images in the same row must have the same height")
 
-        # check if all columns of images have the same width
+        # Check if all columns of images have the same width
         for col in range(cols):
             col_idxs = [self.get_img_idx(row, col, rows, cols) for row in range(rows)]
             widths = [image[idx].shape[2] for idx in col_idxs]
@@ -2978,17 +2996,18 @@ class ImageGrid:
         col_y_pix = [int(sum(col_heights[:i])) for i in range(len(col_heights))]
         col_x_pix = [int(sum(col_widths[:i])) for i in range(len(col_widths))]
 
-        total_height = 0
-        for row in range(rows):
-            total_height += image[self.get_img_idx(row, 0, rows, cols)].shape[0]
-
-        total_width = 0
-        for col in range(cols):
-            total_width += image[self.get_img_idx(0, col, rows, cols)].shape[1]
+        total_height = sum(col_heights)
+        total_width = sum(col_widths)
 
         out_tensor = torch.zeros((1, total_height, total_width, image.shape[3]), dtype=image.dtype,
                                  device=image.device)
 
+        # check if there is not enough rows and cols to display all images
+        max_idx = rows * cols
+        tot_images = len(image)
+        if max_idx < tot_images:
+            raise ValueError("not enough grid space to show all images")
+        
         for idx in range(len(image)):
             x, y = self.get_xy_for_idx(idx, rows, cols)
             x_pix = col_x_pix[x]
