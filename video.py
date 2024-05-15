@@ -18,7 +18,7 @@ import torchaudio
 # from cv2 import VideoWriter, VideoWriter_fourcc, VideoCapture
 # from line_profiler import profile
 from torch import dtype
-#from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
+# from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
 from custom_nodes.EternalKernelLiteGraphNodes.modules.image_utils import lanczos_resize
 import os
@@ -364,8 +364,8 @@ class SmoothStackTemporalByDistance2(ABCABCVideoFolderToImage, metaclass=ABCWidg
         return {"required":
             {
                 "image_stack": ("IMAGE",),
-                "top_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
-                "bottom_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.1, "default": 1.0}),
+                "top_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 1.0}),
+                "bottom_thresh_normed": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 1.0}),
                 "max_iterations": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
                 "target_deviation": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 0.0}),
             }
@@ -530,12 +530,12 @@ class GetImageStackStatistics(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetac
         return {"required":
             {
                 "image_stack": ("IMAGE",),
-                "method": (["SSIM", "MSE"], {"default": "SSIM"}),
+                "method": (["SSIM", "MSE", "REGIONAL"], {"default": "SSIM"}),
             },
 
         }
 
-    RETURN_TYPES = ("STRING", "IMAGE",)
+    RETURN_TYPES = ("STRING", "LIST", "IMAGE",)
 
     def handler(self, image_stack, method):
         import numpy as np
@@ -558,6 +558,95 @@ class GetImageStackStatistics(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetac
         if method == "MSE":
             stack_mse_B = torch.mean(image_stack_BCWH_DIFF ** 2, dim=(1, 2, 3))
             # find the max possible value of the mean squared error
+
+        elif method == "REGIONAL":
+            """
+            this method resamples the image stack of B,W,H,C to B,8,8,C
+            then calculates the mean squared error of each region of the image
+            by further slicing into [b,1,1,C] x 64 regional representations
+            the greatest mean squared from each region is returned
+            """
+            # the input image stack is defined as "image_stack" and it is a torch tensor, B,H,W,C
+
+            B, H, W, C = image_stack.shape
+            levels = [3, 4, 5, 6, 7, 8, 16, 32, 64]
+            max_mse_value_in_all_regions_and_frames_for_this_level = 0
+            level_stats = {k: {"max_mse": None, "max_std_dev": None} for k in levels}
+            for size in levels:
+                # need to re order the channels for the interpolation
+                resampled_stack = image_stack.permute(0, 3, 1, 2)
+
+                # Resample the image stack to 8x8 pixels
+                resampled_stack = torch.nn.functional.interpolate(resampled_stack, size=(size, size), mode='bilinear',
+                                                                  align_corners=False)
+
+                # but the channel order back to the original
+                resampled_stack = resampled_stack.permute(0, 2, 3, 1)
+
+                # Reshape the resampled stack to (B, 64, C)
+                regional_stack = resampled_stack.view(B, size ** 2, C)
+
+                # Calculate the mean squared difference between consecutive frames for each region
+                mse_values = torch.mean((regional_stack[1:] - regional_stack[:-1]) ** 2, dim=2)
+
+                # max mse for each frame
+                max_mse_ea_frame_at_level = torch.max(mse_values, dim=1)[0]
+                max_dev_ea_frame_at_level = torch.std(mse_values, dim=1)
+
+                # Calculate the standard deviation of the mean squared error for each region along the time dimension
+                max_std_dev_of_all_regions_over_time = torch.max(torch.std(mse_values, dim=0))
+
+                # in terms of video
+                # represents the maximum amount of change in the image stack, basically the maximum amount of motion
+                max_mse_value_in_all_regions_and_frames_for_this_level = torch.max(mse_values.view(-1))
+
+                level_stats[size]["max_r_mse_ea_frame"] = max_mse_ea_frame_at_level
+                level_stats[size]["max_r_dev_ea_frame"] = max_dev_ea_frame_at_level
+                level_stats[size]["max_mse"] = max_mse_value_in_all_regions_and_frames_for_this_level
+                level_stats[size]["max_std_dev"] = max_std_dev_of_all_regions_over_time
+
+            all_l_max_mse_ea_frame = [level_stats[k]["max_r_mse_ea_frame"].tolist() for k in levels]
+            all_l_max_std_ea_frame = [level_stats[k]["max_r_dev_ea_frame"].tolist() for k in levels]
+
+            max_l_r_mse_per_batch = []  # Initialize list to store the maximum mean squared error for each batch_num
+            for batch_num in range(B - 1):
+                max_value = float('-inf')  # Initialize max_value to negative infinity for each batch_num
+                for level in levels:
+                    mse_for_level_and_batch = level_stats[level]["max_r_mse_ea_frame"][batch_num]
+                    # Update max_value if the current mse_for_level_and_batch is greater
+                    if mse_for_level_and_batch > max_value:
+                        max_value = mse_for_level_and_batch
+                max_l_r_mse_per_batch.append(
+                    max_value)  # Append the maximum value for the current batch_num to the list
+
+            max_l_r_dev_per_batch = []  # Initialize list to store the maximum standard deviation for each batch_num
+            for batch_num in range(B - 1):
+                max_value = float('-inf')
+                for level in levels:
+                    dev_for_level_and_batch = level_stats[level]["max_r_dev_ea_frame"][batch_num]
+                    if dev_for_level_and_batch > max_value:
+                        max_value = dev_for_level_and_batch
+                max_l_r_dev_per_batch.append(max_value)
+
+            # all_f_max_mse_ea_frame = [level_stats[k]["max_mse_ea_frame"] for k in levels]
+
+            max_mse_value_in_all_regions_and_frames_for_all_levels = torch.max(torch.tensor(all_l_max_mse_ea_frame))
+            max_std_dev_value_in_all_regions_and_frames_for_all_levels = torch.max(torch.tensor(all_l_max_std_ea_frame))
+
+            out_str = f"max difference between any region over time: {max_mse_value_in_all_regions_and_frames_for_this_level}\nmax of how much the amount of motion changes over time: {max_std_dev_of_all_regions_over_time}"
+            out_list = [max_mse_value_in_all_regions_and_frames_for_all_levels,
+                        max_std_dev_value_in_all_regions_and_frames_for_all_levels,
+                        max_l_r_mse_per_batch,
+                        max_l_r_dev_per_batch
+                        ]
+
+            # return the resampled image stack
+
+            out_image = None
+
+            return (out_str, out_list, out_image,)
+
+
 
         else:
             # not implimented
@@ -731,233 +820,163 @@ class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
         return (folder_out,)
 
 
-class TemporalSpatialSmoothing(metaclass=ABCWidgetMetaclass):
-    """Smooths the image stack in time and space"""
-
-    @classmethod
-    def INPUT_TYPES(self):
-        return {"required":
-            {
-                "image_stack": ("IMAGE",),
-                "spatial_kernel_size": ("INT", {"default": 3, "min": 1, "max": 50}),
-                "temporal_kernel_size": ("INT", {"default": 3, "min": 1, "max": 50}),
-            },
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    CATEGORY = "video"
-    OUTPUT_NODE = True
-    FUNCTION = "handler"
-
-    @staticmethod
-    def gaussian_kernel_1d(kernel_size=3, sigma=1.0):
-        import numpy as np
-        if kernel_size % 2 == 0:
-            kernel_size += 1
-        x_coord = torch.arange(-kernel_size // 2 + 1., kernel_size // 2 + 1.).float()
-        gaussian_kernel = (1. / (sigma * torch.sqrt(torch.tensor(2. * np.pi)))) * torch.exp(
-            -x_coord ** 2. / (2 * sigma ** 2))
-        gaussian_kernel = gaussian_kernel / torch.sum(gaussian_kernel)
-        return gaussian_kernel
-
-    def handler(self, **kwargs):
-        import numpy as np
-        import torch
-        import torch.nn as nn
-
-        image_stack = kwargs["image_stack"]
-        spatial_kernel_size = kwargs["spatial_kernel_size"]
-        temporal_kernel_size = kwargs["temporal_kernel_size"]
-        spatial_sigma = kwargs.get("spatial_sigma", 1.0)
-        temporal_sigma = kwargs.get("temporal_sigma", 1.0)
-
-        # make sure image_stack is a torch tensor and has the right dimensions
-        if not torch.is_tensor(image_stack):
-            image_stack = torch.tensor(image_stack, dtype=torch.float32)
-
-        if len(image_stack.shape) < 5:  # if it doesn't have a channel dimension
-            image_stack = image_stack.unsqueeze(0)  # add a batch dimension
-            image_stack = image_stack.permute(0, 4, 1, 2,
-                                              3)  # rearrange dimensions to: (batch, channel, depth, height, width)
-
-        # create 1D Gaussian kernels for each dimension
-        spatial_kernel = self.gaussian_kernel_1d(spatial_kernel_size, spatial_sigma)
-        temporal_kernel = self.gaussian_kernel_1d(temporal_kernel_size, temporal_sigma)
-
-        # apply the convolution along each dimension separately
-        for dim, kernel in enumerate([temporal_kernel, spatial_kernel, spatial_kernel]):
-            padding_size = kernel.shape[0] // 2
-            # define the padding differently for each dimension
-            if dim == 0:  # depth (temporal)
-                padding = nn.ReplicationPad3d((0, 0, 0, 0, padding_size, padding_size))
-            elif dim == 1:  # height
-                padding = nn.ReplicationPad3d((0, 0, padding_size, padding_size, 0, 0))
-            elif dim == 2:  # width
-                padding = nn.ReplicationPad3d((padding_size, padding_size, 0, 0, 0, 0))
-            image_stack = padding(image_stack)
-            if dim == 0:  # depth/temporal
-                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(kernel.shape[0], 1, 1), groups=3,
-                                 bias=False)
-                reshaped_kernel = kernel[None, None, :, None, None]
-            elif dim == 1:  # height
-                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, kernel.shape[0], 1), groups=3,
-                                 bias=False)
-                reshaped_kernel = kernel[None, None, None, :, None]
-            elif dim == 2:  # width
-                conv = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 1, kernel.shape[0]), groups=3,
-                                 bias=False)
-                reshaped_kernel = kernel[None, None, None, None, :]
-            conv.weight = nn.Parameter(reshaped_kernel.repeat(3, 1, 1, 1, 1), requires_grad=False)
-            image_stack = conv(image_stack)
-
-        # remove the batch dimension and rearrange dimensions back to: (depth, height, width, channel)
-        image_stack = image_stack.squeeze(0).permute(1, 2, 3, 0)
-
-        return (image_stack,)
 
 
-class TemporalOpticalFlowSmoothing(metaclass=ABCWidgetMetaclass):
-    """Smooths the image stack in time using RAFT for optical flow estimation"""
+class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
+    """
+    Smooth the temporal dimension of the image stack by calculating the distance between each frame
+    and the next frame and then averaging the frames that are within a certain distance of each other.
+    Supports adaptive mode with target deviation and baseline mode.
+    Can also perform frame interpolation using RIFE VFI.
+    """
+
+    rife_kwargs = {
+        "ckpt_name": "rife49.pth",
+        "clear_cache_after_n_frames": 1000,
+        "multiplier": 2,
+        "fast_mode": False,
+        "ensemble": False,
+        "scale_factor": 1.0,
+        "optional_interpolation_states": None,
+    }
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
             {
                 "image_stack": ("IMAGE",),
-                "k": ("INT", {"default": 3, "min": 1, "max": 120}),
-                "device": ("STRING", ["cpu", "cuda"]),
-            },
+                "top_threshold": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 1.0}),
+                "bottom_threshold": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 1.0}),
+                "max_iters": ("INT", {"min": 0, "max": 1000, "step": 1, "default": 1}),
+                "target_deviation": ("FLOAT", {"min": 0.0, "max": 100000.0, "step": 0.01, "default": 0.0}),
+                "interp_frames": ("BOOLEAN", {"default": False}),
+                "mode": (["adaptive", "baseline"],),
+            }
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    CATEGORY = "video"
-    OUTPUT_NODE = True
-    FUNCTION = "handler"
+    RETURN_TYPES = ("IMAGE", "STRING")
 
-    @staticmethod
-    def make_grid(flow):
-        # Assumes flow is in shape Bx2xHxW
-        B, _, H, W = flow.size()
-        grid_y, grid_x = torch.meshgrid(torch.linspace(-1, 1, W), torch.linspace(-1, 1, H))
-        grid = torch.stack((grid_y.t(), grid_x.t()), 2).unsqueeze(0)
-        grid = grid.repeat(B, 1, 1, 1)  # Make it BxHxWx2
-        grid = grid.permute(0, 3, 1, 2)  # Convert to Bx2xHxW
-        grid = grid.type_as(flow)  # Make sure the data type is the same
-        return grid + flow
+    def compute_stats(self, image_stack):
+        stats_handler = GetImageStackStatistics().handler
+        res = stats_handler(image_stack=image_stack, method="REGIONAL")
+        stats_str, stats_list, _ = res
+        region_diff = torch.tensor(stats_list[2])  # The list of each frame pairs maximum regional difference
+        max_diff = stats_list[0]  # Overall maximum difference
+        max_dev = stats_list[1]  # Overall regional deviation
+        return stats_str, region_diff, max_diff, max_dev
 
-    @staticmethod
-    def worker(args):
+    def compute_baseline_motion(self, region_diff):
+        values, counts = torch.unique(region_diff, return_counts=True)
+        baseline_motion = values[torch.argmax(counts)].item()
+        return baseline_motion
+
+    def normalize_diff(self, region_diff):
+        region_diff_range = region_diff.max() - region_diff.min()
+        if region_diff_range == 0:
+            region_diff_range = 1  # Avoid division by zero
+        region_diff_norm = (region_diff - region_diff.min()) / region_diff_range
+        return region_diff_norm
+
+    def process_top_outliers(self, image_stack, region_diff_norm, top_threshold, rife_vfi):
         import torch.nn.functional as F
-        k, image_stack, device = args
-        weights = Raft_Large_Weights.DEFAULT
-        model = raft_large(weights=weights, progress=False).to(device)
-        model = model.eval()
 
-        img1 = image_stack[0].unsqueeze(0)
-        img2 = image_stack[1].unsqueeze(0)
+        top_outliers = torch.where(region_diff_norm > top_threshold)[0]
+        new_image_stack = []
 
-        # Remove batch dimension if present
-        while len(img1.shape) > 4:
-            print(f"Batch dimension detected. for image shape {img1.shape}")
-            img1 = img1.squeeze(0)
-            img2 = img2.squeeze(0)
+        for idx in range(image_stack.shape[0]):
+            new_image_stack.append(image_stack[idx])
+            if idx in top_outliers and idx < image_stack.shape[0] - 1:  # Ensure we don't go out of bounds
+                frame_pair = image_stack[idx:idx + 2]
+                interpolated_frames = rife_vfi(frames=frame_pair, **self.rife_kwargs)[0]
 
-        # Permute tensor dimensions to match expected input for model
-        img1 = img1.permute(0, 3, 1, 2)
-        img2 = img2.permute(0, 3, 1, 2)
+                # Calculate the MSE for each interpolated frame with the first and last frames of the pair
+                mse_first = [F.mse_loss(interpolated_frame, frame_pair[0]) for interpolated_frame in
+                             interpolated_frames]
+                mse_last = [F.mse_loss(interpolated_frame, frame_pair[1]) for interpolated_frame in interpolated_frames]
 
-        # Move images to the specified device
-        img1, img2 = img1.to(device), img2.to(device)
+                # Find the interpolated frame with the smallest difference between mse_first and mse_last
+                mse_diff = [abs(mse_f - mse_l) for mse_f, mse_l in zip(mse_first, mse_last)]
+                middle_frame_index = torch.argmin(torch.tensor(mse_diff)).item()
 
-        flow = model(img1, img2)[-1]
+                choice = interpolated_frames[middle_frame_index]
+                new_image_stack.append(choice)
 
-        # Create intermediary frames
-        frames = []
-        for i in range(k):
-            factor = i / k
-            # factor = factor * 2 - 1
+        new_image_stack = torch.stack(new_image_stack)
+        return new_image_stack, len(top_outliers)
 
-            # normalize flow
-            n_flow = flow.clone()
-            print(n_flow.min(), n_flow.max(), n_flow.dtype)
-            # n_flow[:,0,:,:] = n_flow[:,0,:,:] / (n_flow[:,0,:,:].max() - n_flow[:,0,:,:].min())
-            # n_flow[:,1,:,:] = n_flow[:,1,:,:] / (n_flow[:,1,:,:].max() - n_flow[:,1,:,:].min())
-            # print(n_flow.min(), n_flow.max(), n_flow.dtype)
-            # n_flow[:, 0, :, :] = n_flow[:, 0, :, :] - n_flow[:, 0, :, :].min()
-            # n_flow[:, 1, :, :] = n_flow[:, 1, :, :] - n_flow[:, 1, :, :].min()
-            # print (n_flow.min(), n_flow.max(),n_flow.dtype)
-            n_flow = n_flow / n_flow.shape[2]
-            print(n_flow.min(), n_flow.max(), n_flow.dtype)
+    def drop_bottom_outliers(self, image_stack, region_diff_norm, bottom_threshold):
+        bottom_outliers = torch.where(region_diff_norm < bottom_threshold)[0]
+        if len(bottom_outliers) > 0:
+            mask = torch.ones(image_stack.size(0), dtype=torch.bool)
+            mask[bottom_outliers + 1] = False
+            image_stack = image_stack[mask]
+        return image_stack, len(bottom_outliers)
 
-            flow_interpolated = n_flow * factor
-            grid = TemporalOpticalFlowSmoothing.make_grid(flow_interpolated)
-            grid = grid.permute(0, 2, 3, 1)
-            warped_image = F.grid_sample(img1, grid, mode='bicubic', padding_mode='zeros')
-            warped_image = warped_image.permute(0, 2, 3, 1).detach().cpu()  # Convert it back to BxHxWxC
-            frames.append(warped_image)
+    def log_info(self, iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff, max_dev, stats_str):
+        info = f"Iteration {iteration}:\n"
+        info += f"Frames changed by top threshold: {top_outliers_count}\n"
+        info += f"Frames dropped by bottom threshold: {bottom_outliers_count}\n"
+        info += f"Mean of region_diff: {mean_diff}\n"
+        info += f"Std of region_diff: {std_diff}\n"
+        info += f"Overall max difference: {max_diff}\n"
+        info += f"Overall max deviation: {max_dev}\n"
+        info += f"Image stack statistics: {stats_str}\n\n"
+        return info
 
-        return frames
+    def handler(self, image_stack, top_threshold=0.9, bottom_threshold=0.10, max_iters=1, target_deviation=0.0, interp_frames=False, mode="adaptive"):
+        import torch
+        import nodes
 
-    @staticmethod
-    def calculate_optical_flow(image_stack, device, k):
-        # from torch.multiprocessing import Pool, set_start_method
+        image_stack = image_stack.to(torch.float16)
+        log = ""
+        iteration = 0
 
-        # set_start_method('spawn')  # set the start method to spawn
-        # with Pool(2) as pool:
-        #    # create the tasks in an intellegent way, detaching each stack, with each stack being only the frames needed
-        #    tasks = []
-        #    for t in range(image_stack.shape[0] - 1):
-        #        needed_frames = [t, t + 1]  # the frames needed for this task
-        #        stack = image_stack[needed_frames, :, :, :]  # the stack of frames needed for this task
-        #        stack = stack.clone()
-        #        tasks.append((2, stack.detach().cpu(), device))  # add the task to the list of tasks
-        #    flows = pool.map(TemporalOpticalFlowSmoothing.worker, tasks)
-        #    # print(f"flows: {flows}")
-        #    # print(f"flows[0]: {flows[0]}")
+        if interp_frames:
+            rife_vfi = nodes.NODE_CLASS_MAPPINGS["RIFE VFI"]().vfi
 
-        ##map(TemporalOpticalFlowSmoothing.worker, tasks)
+        if mode == "baseline":
+            # Compute initial statistics and baseline motion
+            stats_str, region_diff, max_diff, max_dev = self.compute_stats(image_stack)
+            baseline_motion = self.compute_baseline_motion(region_diff)
+            target_deviation = baseline_motion
+            log += f"Baseline motion (mode of max regional differences): {baseline_motion}\n"
 
-        flows = []
-        for i in range(image_stack.shape[0] - 1):
-            needed_frames = [i, i + 1]  # the frames needed for this task
-            keys = image_stack[needed_frames, :, :, :]
-            flow = TemporalOpticalFlowSmoothing.worker((k, keys, device))
+        while True:
+            # Step 1: Compute statistics
+            stats_str, region_diff, max_diff, max_dev = self.compute_stats(image_stack)
 
-            flows.append(keys[0].cpu())
-            for f in flow:
-                flows.append(f[0].cpu())
-            # flows.append(keys[1].cpu())
+            # Step 2: Normalize differences
+            region_diff_norm = self.normalize_diff(region_diff)
 
-        return flows
+            mean_diff = region_diff.mean().item()
+            std_diff = region_diff.std().item()
 
-    def handler(self, **kwargs):
-        from copy import deepcopy
-        # image stacks are actually (b/t,w,h,c) so we need to rearrange the dimensions
-        k = kwargs["k"]
-        image_stack = deepcopy(kwargs["image_stack"])
-        device = kwargs.get("device", "cpu")
+            # Step 3: Check if the target deviation is met or if max iterations are reached
+            if std_diff <= target_deviation or iteration >= max_iters:
+                log+=f"std_diff <= target_deviation or iteration >= max_iters"
+                break
 
-        image_stack = image_stack.permute(0, 2, 1, 3)
+            # Step 4: Identify and process top outliers
+            image_stack, top_outliers_count = self.process_top_outliers(image_stack, region_diff_norm, top_threshold, rife_vfi)
 
-        # make sure image_stack is a torch tensor and has the right dimensions
-        if not torch.is_tensor(image_stack):
-            image_stack = torch.tensor(image_stack, dtype=torch.float32)
+            # Step 5: Identify and drop bottom outliers
+            image_stack, bottom_outliers_count = self.drop_bottom_outliers(image_stack, region_diff_norm, bottom_threshold)
 
-        if len(image_stack.shape) < 4:  # if it doesn't have a channel dimension
-            image_stack = image_stack.unsqueeze(0)  # add a batch dimension
+            # Log information
+            log += self.log_info(iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff, max_dev, stats_str)
 
-        # Move image stack to the specified device
-        image_stack = image_stack.to(device)
+            # Increment the iteration counter
+            iteration += 1
 
-        # Calculate optical flow
-        flows = self.calculate_optical_flow(image_stack, device, k)
-        stack = torch.stack(flows, dim=0)
-        # Convert optical flows to images for visualization
-        # flow_images = [flow_to_image(flow) for flow in flows]
-        # change back to (b or t,w,h,c)
+            # Step 6: Check if the image stack is empty
+            if image_stack.shape[0] == 0:
+                return (None, "Image stack is empty after processing. No frames left.")
 
-        stack = stack.permute(0, 2, 1, 3)
-        return (stack,)
+
+
+        return (image_stack.to(torch.float32), log)
+
+
 
 
 class MovingCircle(metaclass=ABCWidgetMetaclass):
@@ -1231,6 +1250,9 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
     def handler(self, **kwargs):
         import imageio
         import os
+        import time
+
+        start_time = time.time()
 
         folders_with_frames = kwargs["folders_with_frames"]
         fps_length_value = kwargs["fps/length"]
@@ -1278,6 +1300,8 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
             except Exception as e:
                 messages.append(f"Error processing folder {folder_path}: {str(e)}")
 
+        end_time = time.time()
+        print(f"Time taken for CombineFoldersWithFramesToVideoFiles: {end_time - start_time} seconds")
         return (combined_video_paths, "\n".join(messages),)
 
 
@@ -2105,9 +2129,15 @@ class AudioFolderProvider(metaclass=ABCWidgetMetaclass):
 
     @classmethod
     def INPUT_TYPES(cls):
-        ret = {"required": {"folder_path": ("STRING", {"default": None}),
-                            },
-               }
+        ret = {
+            "required": {
+                "folder_path": ("STRING", {"default": None}),
+            },
+            "optional": {
+                "activator:": ("*", {"default": None})
+            }
+        }
+
         return ret
 
     RETURN_TYPES = ("AUDIOFOLDER",)
@@ -2179,10 +2209,11 @@ class VideoDefinitionProvider(metaclass=ABCWidgetMetaclass):
         ret.get_frame_count = lambda: len([f for f in os.listdir(ret["video_folder"]) if "frame_" in f])
         # a function that gets the next file name and full path dont forget to add 10 zeros to the frame count
         ret.get_next_file_name = lambda x=0: os.path.join(ret['video_folder'],
-                                                      f"frame_{str(ret.get_frame_count()+x).zfill(10)}.{ret['frame format'].lower()}")
+                                                          f"frame_{str(ret.get_frame_count() + x).zfill(10)}.{ret['frame format'].lower()}")
         ret.get_last_file_name = lambda offset=0: os.path.join(ret['video_folder'],
                                                                f"frame_{str(max(ret.get_frame_count() - offset - 1, 0)).zfill(10)}.{ret['frame format'].lower()}")
-        ret.get_current_file_name = lambda: os.path.join(ret['video_folder'], f"frame_{str(ret.get_frame_count() - 1).zfill(10)}.{ret['frame format'].lower()}")
+        ret.get_current_file_name = lambda: os.path.join(ret['video_folder'],
+                                                         f"frame_{str(ret.get_frame_count() - 1).zfill(10)}.{ret['frame format'].lower()}")
 
         def reserve_next_frame():
             fn = ret.get_next_file_name()
@@ -2368,6 +2399,8 @@ class GetAudioFilesLengthsFromAudioFolder(metaclass=ABCWidgetMetaclass):
         audio_files_lengths = []
 
         for audio_file in audio_files:
+            if audio_file[-3:] not in ["wav", "mp3"]:
+                continue
             audio_path = os.path.join(audio_folder, audio_file)
             waveform, sample_rate = torchaudio.load(audio_path)
             duration = waveform.shape[1] / sample_rate
@@ -3085,12 +3118,12 @@ class VideoFolderFFMPEGVideoInterpolate(metaclass=ABCWidgetMetaclass):
         output_frame_names = [video_folder_def.get_next_file_name(i) for i in range(target_n_frames)]
 
         # delete the frames on the list
-        #for frame_name in output_frame_names:
+        # for frame_name in output_frame_names:
         #    os.remove(frame_name)
 
         temp_output_frame_pattern = os.path.join(video_folder_def["video_folder"], "temp",
                                                  "tmp_frame_%010d." + video_folder_def["frame format"].lower())
-        temp_output_frame_pattern=os.path.abspath(temp_output_frame_pattern)
+        temp_output_frame_pattern = os.path.abspath(temp_output_frame_pattern)
 
         # Create the FFmpeg command for motion interpolation using the frame list file
         ffmpeg_interpolate_cmd = [
@@ -3126,3 +3159,69 @@ class VideoFolderFFMPEGVideoInterpolate(metaclass=ABCWidgetMetaclass):
             shutil.rmtree(temp_folder)
 
         return (video_folder_def,)
+
+
+class AddMetadataNode(metaclass=ABCWidgetMetaclass):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "input_file": ("STRING", {"default": "input.mp4"}),
+                "output_file": ("STRING", {"default": "output.mp4"}),
+                "metadata": ("STRING", {"default": "title:My Video"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)  # This node returns a string message indicating success or failure
+    RETURN_NAMES = ("status_message",)  # Providing a name for the return type
+    FUNCTION = "add_metadata"
+    CATEGORY = "video processing"
+
+    def add_metadata(self, input_file, output_file, metadata):
+        from ffmpeg import FFmpeg
+        import shutil
+
+        import torch  # Importing torch as it seems to be a convention in your framework
+        # Parse the metadata from string to dictionary
+        # strip input and output file
+        input_file = input_file.strip()
+        output_file = output_file.strip()
+
+        # so actually if the input_file and output_file are the same
+        # it will by default have an error
+        # co if this is the case copy then input file to a tempfile then use that as the input file
+        import tempfile
+
+        if input_file == output_file:
+            # copy the input file to a temp file
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_file_name = temp_file.name
+                shutil.copy(input_file, temp_file_name)
+                input_file = temp_file_name
+
+        metadata_dict = {}
+        try:
+            for line in metadata.splitlines():
+                key, value = line.split(':', 1)  # Split on the first colon
+                mdkey = "metadata"
+                # metadata_dict.append(f'metadata:{key.strip()}={value.strip()}')
+                metadata_dict[mdkey] = f'{key.strip()}={value.strip()}'
+
+            # Run ffmpeg to add metadata
+            ffmpeg = FFmpeg().option("y")
+            try:
+                # make sure to tell it to overwrite outputfile
+
+                ffmpeg.input(input_file).output(output_file, **metadata_dict).execute()
+
+                return (f"status_message : Metadata added successfully to {output_file}.",)
+            except Exception as e:
+                return (f"status_message : Error adding metadata to {output_file}.{str(e)}",)
+
+            return (f"status_message : Metadata added successfully to {output_file}.",)
+        except Exception as e:
+            return (f"status_message : Error adding metadata to {output_file}.",)
+
+    @staticmethod
+    def describe():
+        return "This node adds metadata to video files using ffmpeg. Metadata should be provided as 'key: value' pairs separated by newlines."
