@@ -53,6 +53,32 @@ class LanczosInterpolationLayer(nn.Module):
         super(LanczosInterpolationLayer, self).__init__()
         self.target_size = target_size
 
+    def visualize_tensor(self,tensor, title):
+        from PIL import Image, ImageDraw, ImageFont
+        # Convert the tensor to a PIL image
+        tensor = tensor.squeeze().cpu().numpy()
+        tensor = (tensor * 255).astype('uint8')
+        image = Image.fromarray(tensor)
+
+        # Create a new image for the text
+        text_image = Image.new('RGB', (200, 100), color='white')
+        draw = ImageDraw.Draw(text_image)
+        font = ImageFont.truetype("arial.ttf", 16)
+
+        # Add the title, min, and max values to the text image
+        min_val = tensor.min()
+        max_val = tensor.max()
+        text = f"{title}\nMin: {min_val:.6f}\nMax: {max_val:.6f}"
+        draw.text((10, 10), text, fill='black', font=font)
+
+        # Combine the original image and the text image
+        combined_image = Image.new('RGB', (image.width + text_image.width, max(image.height, text_image.height)),
+                                   color='white')
+        combined_image.paste(image, (0, 0))
+        combined_image.paste(text_image, (image.width, 0))
+
+        # Display the combined image
+        combined_image.show()
     def forward(self, x):
         """
         Performs the forward pass of the Lanczos interpolation layer.
@@ -76,37 +102,48 @@ class LanczosInterpolationLayer(nn.Module):
 
             color_range = mx - mn
 
-            under_bottom_target_range = -10/255
-            over_top_target_range = 1/255
+            under_bottom_target_range = -10 // 255
+            over_top_target_range = 10 // 255
+
+            #self.visualize_tensor(torch.from_numpy(interpolated_image), "Original Image")
 
             if color_range > 1:
                 # here we are going to compress the over the top values
                 over_top = interpolated_image > 1
-                not_over_top = interpolated_image < 1
+                not_over_top = interpolated_image <= 1
                 over_top_range = mx - 1
-                # subtract the normal top value
-                interpolated_image[over_top] = interpolated_image[over_top] - 1
+                over_top_scale = over_top_target_range / over_top_range
                 # scale the over the top values to the target range
-                interpolated_image[over_top] *= (over_top_target_range / over_top_range)
-                # add the target range to the over the top values
-                interpolated_image[over_top] += (1-over_top_target_range)
+                interpolated_image[over_top] = 1 + (interpolated_image[over_top] - 1) * over_top_scale
+                #self.visualize_tensor(torch.from_numpy(interpolated_image), "After Over-the-Top Compression")
                 # scale the non-over-the top to make room
-                interpolated_image[not_over_top] *= (1 - over_top_target_range)
+                interpolated_image[not_over_top] = interpolated_image[not_over_top] * (1 - over_top_target_range)
+                #self.visualize_tensor(torch.from_numpy(interpolated_image), "After Non-Over-the-Top Scaling")
 
                 # here we are going to compress the under the bottom values
                 under_bottom = interpolated_image < 0
-                not_under_bottom = interpolated_image > 0
-                under_bottom_range = mn
-                # subtract the normal bottom value
-                interpolated_image[under_bottom] = interpolated_image[under_bottom] - 0
+                not_under_bottom = interpolated_image >= 0
+                under_bottom_range = -mn
+                under_bottom_scale = under_bottom_target_range / under_bottom_range
                 # scale the under the bottom values to the target range
-                interpolated_image[under_bottom] *= (under_bottom_target_range / under_bottom_range)
-                # add the target range to the under the bottom values
-                interpolated_image[under_bottom] += under_bottom_target_range
-                # scale the non-under-the-bottom to make room
-                interpolated_image[not_under_bottom] *= (1 - under_bottom_target_range)
 
+                #print("Max value:", interpolated_image.max())
+                #print("Min value:", interpolated_image.min())
 
+                interpolated_image[under_bottom] = interpolated_image[under_bottom] * under_bottom_scale
+                #self.visualize_tensor(torch.from_numpy(interpolated_image), "After Under-the-Bottom Compression")
+
+                # scale and shift the non-under-the-bottom to make room
+                #interpolated_image[not_under_bottom] = interpolated_image[not_under_bottom] * (
+                #            1 - over_top_target_range) + under_bottom_target_range
+
+                #self.visualize_tensor(torch.from_numpy(interpolated_image),"After Non-Under-the-Bottom Scaling and Shifting")
+
+                #print("Max value:", interpolated_image.max())
+                #print("Min value:", interpolated_image.min())
+
+                # clamp
+                interpolated_image = np.clip(interpolated_image, 0, 1)
 
 
             else:
