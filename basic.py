@@ -205,7 +205,6 @@ class StrBreakout:
             notes.append(f"split(',') dtype failed: {e}")
             pass
 
-
         return ("\n".join(notes), out_bool, out_int, out_float, out_list, out_lines, out_comma,)
 
 
@@ -410,6 +409,178 @@ class ObjectToAny:
         return (None, dbg)
 
 
+from torch import Tensor
+from comfy.model_patcher import ModelPatcher
+COMFY_PYTHON_CLAS_NAMES = {
+    "INT": int,
+    "FLOAT": float,
+    "STRING": str,
+    "BOOLEAN": bool,
+    "TUPLE": tuple,
+    "LIST": list,
+    "DICT": dict,
+    "FUNC": callable,
+    "LATENT": dict,
+    "CONDITIONING": dict,
+    "IMAGE": Tensor,
+    "MASK": Tensor,
+    "LLLM_MESSAGES": list,
+    "LITELLM_MODEL": str,
+    "MODEL": ModelPatcher,
+}
+
+
+def value_try(val, cls):
+    try:
+        return cls(val)
+    except:
+        return None
+
+
+class AnyToValue:
+    """
+    takes * and returns it in the node systems common value types
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "A": ("*", {
+                    "default": None,
+                }),
+            }}
+
+    RETURN_TYPES = ("INT", "FLOAT", "STRING", "BOOLEAN", "TUPLE",)
+    FUNCTION = "get_value"
+    CATEGORY = "conversion"
+
+    def get_value(self, A):
+        int_o = value_try(A, int)
+        float_o = value_try(A, float)
+        str_o = value_try(A, str)
+        bool_o = value_try(A, bool)
+        tuple_o = value_try(A, tuple)
+
+        return (int_o, float_o, str_o, bool_o, tuple_o,)
+
+
+class AnyToIterable:
+    """
+    takes * and returns it in the node systems common value types
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "Any": ("*", {
+                    "default": None,
+                }),
+            }}
+
+    RETURN_TYPES = ("LIST", "DICT",)
+    FUNCTION = "get_value"
+    CATEGORY = "conversion"
+
+    def get_value(self, Any):
+        list_o = None
+        dict_o = None
+
+        if isinstance(Any, list):
+            list_o = Any
+
+        if isinstance(Any, dict):
+            dict_o = Any
+
+        return (list_o, dict_o,)
+
+
+class AnyToObject:
+    """
+    like AnyToIterable but for Image,latent,conditioning,model
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "Any": ("*", {
+                    "default": None,
+                }),
+            }}
+
+    RETURN_TYPES = ("IMAGE", "LATENT", "CONDITIONING", "MODEL")
+    FUNCTION = "get_value"
+    CATEGORY = "conversion"
+
+
+    def get_value(self, Any):
+        image_o = None
+        latent_o = None
+        conditioning_o = None
+        model_o = None
+
+        if   isinstance(Any, COMFY_PYTHON_CLAS_NAMES['IMAGE']):
+            image_o = Any
+        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['LATENT']):
+            latent_o = Any
+        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['CONDITIONING']):
+            conditioning_o = Any
+        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['MODEL']):
+            model_o = Any
+
+        return (image_o, latent_o, conditioning_o, model_o,)
+
+
+class TimeThis:
+    """
+    Pass through node that records the current time to a given variable name
+    then when called again reports the time difference
+    """
+
+    start_times = {}
+    end_times = {}
+    last_activator = None
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "var_name": ("STRING", {"default": "timer0", }),
+                "pass_through": ("*", {"default": None, }),
+                "start": ("BOOLEAN", {"default": True})
+            },
+            "optional": {
+                "activator": ("*")
+            }
+
+        }
+
+    INTERNAL_STATE_DISPLAY = "text_display"
+    RETURN_TYPES = ("STRING", "FLOAT", "OBJECT")
+    RETURN_NAMES = ("Notes", "Time", "Object")
+    FUNCTION = "time_this"
+    CATEGORY = "utils"
+
+    def time_this(self, var_name, pass_through, start, activator=None):
+        import time
+
+        if start:
+            self.start_times[var_name] = time.time()
+            print (f"Timer started for {var_name}")
+            ret =  ("Timer started", 0.0, pass_through)
+        else:
+            if var_name not in self.start_times:
+                return ("Timer not started", 0.0, pass_through)
+            self.end_times[var_name] = time.time()
+            time_diff = self.end_times[var_name] - self.start_times[var_name]
+            print (f"Timer ended for {var_name} time taken: {time_diff}")
+            ret =  (f"Time taken: {time_diff}", time_diff, pass_through)
+
+        ret = {"ui": {"text": (ret[0],)}, "result": ret}
+        return ret
+
 NODE_CLASS_MAPPINGS = {}
 NODE_CLASS_MAPPINGS["MultilineStringNode"] = MultilineStringNode
 NODE_CLASS_MAPPINGS["StrBreakout"] = StrBreakout
@@ -421,3 +592,8 @@ NODE_CLASS_MAPPINGS["CallableToAny"] = CallableToAny
 NODE_CLASS_MAPPINGS["ObjectToAny"] = ObjectToAny
 
 NODE_CLASS_MAPPINGS["ETK_Tuple"] = TupleNode
+NODE_CLASS_MAPPINGS["AnyToValue"] = AnyToValue
+NODE_CLASS_MAPPINGS["AnyToIterable"] = AnyToIterable
+NODE_CLASS_MAPPINGS["TimeThis"] = TimeThis
+NODE_CLASS_MAPPINGS["AnyToObject"] = AnyToObject
+
