@@ -75,9 +75,11 @@ class AudioFileListFromPathPattern:
         l_bytes = []
         l_metadata = []
         for fpath in l_fpaths:
-            with open(fpath, "rb") as f:
-                l_bytes.append(f.read())
-            l_metadata.append(GetAudioMetaData().get_audio_metadata(path=fpath)[0])
+            if fpath[-4:] in [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".aiff", ".alac", ".au", ".raw",
+                              ".mp2", ]:
+                with open(fpath, "rb") as f:
+                    l_bytes.append(f.read())
+                l_metadata.append(GetAudioMetaData().get_audio_metadata(path=fpath)[0])
 
         return (l_fpaths, l_bytes, l_metadata,)
 
@@ -414,14 +416,22 @@ class XttsNode:
 
         # Check if '[text]' is in kwargs and if it is a list
         if '[text]' in kwargs and isinstance(kwargs['[text]'], list):
-            texts = str(kwargs['[text]'])
+            texts = kwargs['[text]']
         else:
-            texts = str([kwargs.get('text', "")])
+            texts = [kwargs.get('text', "")]
+
+        # create a temporary file in the given folder with the speech seperated by new lines
+        fp = kwargs.get('output_path') or audio_folder_def["audio_folder"]
+        fpn = os.path.join(fp, "temp.txt")
+        fpn = os.path.abspath(fpn)
+        with open(fpn, "w") as f:
+            for text in texts:
+                f.write(text + "\n")
 
         # Create the command
         command = [
             python_exe, xttscli_path,
-            "--text", texts,
+            "--file", fpn,
             "--folder", kwargs.get('output_path', "."),
             "--lang", kwargs.get('lang', 'en'),
             "--speaker", kwargs.get('speaker_wav', ''),
@@ -441,7 +451,11 @@ class XttsNode:
         for src_file in generated_files:
             target_file = audio_folder_def.get_next_file_name()
             shutil.copy(src_file, target_file)
-            out_files.append(target_file)
+            try:
+                out_files.append(target_file)
+            except FileNotFoundError as e:
+                raise e
+
 
         return (out_files[0], out_files, output_folder, audio_folder_def,)
 
