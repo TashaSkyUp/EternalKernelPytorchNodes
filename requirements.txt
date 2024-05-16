@@ -60,3 +60,4 @@ TTS
 #deps for ocr
 pytesseract
 scikit-image
+h5py
