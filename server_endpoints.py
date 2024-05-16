@@ -439,6 +439,9 @@ async def get_user_graphs(request):
     import os
     import subprocess
 
+    if git_io == None:
+        return web.json_response({"error": "git_io not set"}, status=401)
+
     def run_git_command(command: list, dir_path: str):
         """Helper function to run a git command in the specified directory"""
         return subprocess.call(command, cwd=dir_path)

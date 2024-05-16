@@ -153,7 +153,7 @@ class AddLinearLayerNode:
         return {
             "required": {
                 "model": ("TORCH_MODEL",),
-                "in_features": ("INT", {"min": 1}),
+                "in_features": ("INT", {"min": 1, "max": 2 ** 24}),
                 "out_features": ("INT", {"min": 1}),
                 "bias": ([True, False],),
                 "initialization": (["default", "xavier_uniform", "xavier_normal"],),
@@ -229,6 +229,69 @@ class AddSoftmaxLayerNode:
             # layers.append(new_linear_layer)
             # new_model = nn.Sequential(*layers)
             model.insert(len(model), new_softmax_layer)
+        else:
+            raise TypeError("The provided model is not a nn.Sequential model.")
+
+        # Returning the modified model
+        return (model,)
+
+
+@ETK_pytorch_base
+class AddConvLayer:
+    """
+    Convolutional layer
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "one_d": ("BOOLEAN", {"default": False}),
+                "in_channels": ("INT", {"min": 1}),
+                "out_channels": ("INT", {"min": 1}),
+                "kernel_size": ("INT", {"min": 1}),
+                "stride": ("INT", {"min": 1}),
+                "padding": ("STRING", {"default":"(0,0)"}),
+                "bias": ([True, False],),
+                "initialization": (["default", "xavier_uniform", "xavier_normal"],),
+                "dtype": (["float32", "float64", "float16", "int32", "int64", "int16", "int8", "uint8"],),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_conv_layer"
+    CATEGORY = "model"
+
+    def add_conv_layer(self, model, one_d, in_channels, out_channels, kernel_size, stride, padding, bias=True,
+                       initialization="default", dtype="float32"):
+        import torch
+        # Create the new convolutional layer
+        use_dtype = getattr(torch, dtype)
+        padding=padding.replace("(", "")
+        padding=padding.replace(")", "")
+        padding = tuple(map(int, padding.split(",")))
+        if not one_d:
+            new_conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias,
+                                       dtype=use_dtype)
+        else:
+            new_conv_layer = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, bias=bias,
+                                       dtype=use_dtype)
+
+        new_conv_layer.requires_grad_(True)
+
+        # Initialize the weights if required
+        if initialization == "xavier_uniform":
+            nn.init.xavier_uniform_(new_conv_layer.weight)
+        elif initialization == "xavier_normal":
+            nn.init.xavier_normal_(new_conv_layer.weight)
+
+        # Reconstruct the nn.Sequential model to include the new layer
+        if isinstance(model, nn.Sequential):
+            # layers = list(model.children())
+            # layers.append(new_linear_layer)
+            # new_model = nn.Sequential(*layers)
+            model.insert(len(model), new_conv_layer)
         else:
             raise TypeError("The provided model is not a nn.Sequential model.")
 
@@ -526,9 +589,11 @@ class LoadModel:
     def load(self, path):
         # perform inference on the input data or dataset using the model
         # and return the output
+        print("loaded model: ", path)
         model = torch.load(path)
         return (model,)
 
+    @classmethod
     def IS_CHANGED(s, path):
         # get the date modified of the model at the folder_path
         import os
@@ -580,7 +645,7 @@ class TrainModel:
                 "dataset": ("TORCH_DATASET",),
                 "features tensor": ("TORCH_DATASET",),
                 "labels tensor": ("TORCH_DATASET",),
-                "epochs": ("INT", {"default": 1, "min": 1, "max": 2 ** 16}),
+                "epochs": ("INT", {"default": 1, "min": 1, "max": 2 ** 24}),
                 "batch_size": ("INT", {"default": 1}),
                 "loss_function": (loss_functions,),
                 "optimizer": ("STRING", {"default": "torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)"}),
@@ -898,6 +963,94 @@ class Activation:
     def activation(self, model, activation):
         act = getattr(torch.nn.modules.activation, activation)()
         model = model.insert(len(model), act)
+        return (model,)
+
+
+@ETK_pytorch_base
+class AddReshapeLayer:
+    """
+    Adds a reshape layer to the model.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "shape": ("STRING", {"default": "1, -1"}),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_reshape_layer"
+    CATEGORY = "model"
+
+    def add_reshape_layer(self, model, shape):
+        import torch.nn as nn
+        t = tuple([int(i) for i in shape.split(",")])
+
+        # Create the new reshape layer
+        reshape_layer_f = nn.Flatten(0)
+        reshape_layer_u = nn.Unflatten(0, t)
+
+        # Reconstruct the nn.Sequential model to include the new layer
+        if isinstance(model, nn.Sequential):
+            model.insert(len(model), reshape_layer_f)
+            model.insert(len(model), reshape_layer_u)
+        else:
+            raise TypeError("The provided model is not an nn.Sequential model.")
+
+        # Returning the modified model
+        return (model,)
+
+
+@ETK_pytorch_base
+class AddTransformerLayer:
+    """
+    Adds a transformer encoder layer to the model.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "input_features": ("INT", {"min": 1, "max": 2 ** 24}),
+                "num_heads": ("INT", {"min": 1}),
+                "feedforward_dim": ("INT", {"min": 1}),
+                "dropout": ("FLOAT", {"min": 0.0, "max": 1.0, "default": 0.1}),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_transformer_layer"
+    CATEGORY = "model"
+
+    def add_transformer_layer(self, model, input_features, num_heads, feedforward_dim, dropout=0.1):
+        import torch.nn as nn
+
+        # Create the new transformer encoder layer
+        # input_features: The number of expected features in the input
+        # num_heads: The number of heads in the multihead attention mechanism
+        # feedforward_dim: The dimension of the feedforward network model, more specifically the hidden layer
+        # this will have the effect of increasing the model's capacity, and as far as output shape is concerned,
+        # it will be the same as the input shape
+        # dropout: The dropout probability (default: 0.1)
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=input_features,
+            nhead=num_heads,
+            dim_feedforward=feedforward_dim,
+            dropout=dropout
+        )
+
+        # Check if the provided model is an nn.Sequential model
+        if isinstance(model, nn.Sequential):
+            # Add the transformer layer to the end of the model
+            model.insert(len(model), transformer_layer)
+        else:
+            raise TypeError("The provided model is not an nn.Sequential model.")
+
+        # Return the modified model
         return (model,)
 
 
@@ -1221,6 +1374,115 @@ class LoadTorchTensor:
         Loads a torch tensor from a file
         """
         return (torch.load(file),)
+
+
+@ETK_pytorch_base
+class FuncModifyModel:
+    """
+    allows users to modify a model using a function
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),  # The input data to perform inference on
+                "function": ("STRING", {"default": "model", "multiline": True}),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "modify_model"
+
+    def modify_model(self, model, function):
+        from copy import deepcopy
+
+        old_model = deepcopy(model)
+        exec(function)
+        new_model = model
+        if old_model == new_model:
+            raise ValueError("The model was not modified.")
+
+        return (new_model,)
+
+
+@ETK_pytorch_base
+class PlotSeriesString:
+    """
+    Plots a series of strings
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "series": ("STRING", {"default": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10"}),
+            },
+            "optional": {
+                "title": ("STRING", {"default": "Series Plot"}),
+                "xlabel": ("STRING", {"default": "X-axis"}),
+                "ylabel": ("STRING", {"default": "Y-axis"}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "plot_series_string"
+    OUTPUT_NODE = True
+
+    def plot_series_string(self, series, title="Series Plot", xlabel="X-axis", ylabel="Y-axis"):
+        """
+        uses matplotlib to create a plot of a series of float values of a string (seperated by newlines)
+        saves that plot to the disk then reads it back into memory as a pytorch tensor of float32 (B,H,W,C)
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import io
+        import PIL
+        from PIL import Image
+        import torch
+
+        if isinstance(series, str):
+            # split the series on newlines
+            series = series.split("\n")
+        elif isinstance(series, list):
+            pass
+        else:
+            raise ValueError("series must be a string or a list")
+
+        # convert to float
+        series = [float(s) for s in series]
+        # create the plot
+        plt.plot(series)
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        # save the plot to a buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        # read the buffer into a PIL image
+        im = Image.open(buf)
+        # convert the PIL image to a numpy array
+        im = np.array(im)
+
+        # convert the numpy array to a tensor
+        im = torch.tensor(im)
+
+        # now the im will have a shape of (H,W,C) and a dtype of uint8
+        # we need to convert it to (B,H,W,C) and float32
+        # add a batch dimension
+
+        im = im.unsqueeze(0)
+        # convert to float32
+        im = im.float()
+        # correct the data range
+        im = im / 255.0
+
+        # close the plot
+        plt.close()
+        buf.close()
+
+        return (im,)
 
 
 if __name__ == "__main__":
