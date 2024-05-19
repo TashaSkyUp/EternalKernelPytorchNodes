@@ -820,8 +820,6 @@ class ImageStackToVideoFramesFolder(metaclass=ABCWidgetMetaclass):
         return (folder_out,)
 
 
-
-
 class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass):
     """
     Smooth the temporal dimension of the image stack by calculating the distance between each frame
@@ -912,7 +910,8 @@ class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass
             image_stack = image_stack[mask]
         return image_stack, len(bottom_outliers)
 
-    def log_info(self, iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff, max_dev, stats_str):
+    def log_info(self, iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff, max_dev,
+                 stats_str):
         info = f"Iteration {iteration}:\n"
         info += f"Frames changed by top threshold: {top_outliers_count}\n"
         info += f"Frames dropped by bottom threshold: {bottom_outliers_count}\n"
@@ -923,7 +922,8 @@ class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass
         info += f"Image stack statistics: {stats_str}\n\n"
         return info
 
-    def handler(self, image_stack, top_threshold=0.9, bottom_threshold=0.10, max_iters=1, target_deviation=0.0, interp_frames=False, mode="adaptive"):
+    def handler(self, image_stack, top_threshold=0.9, bottom_threshold=0.10, max_iters=1, target_deviation=0.0,
+                interp_frames=False, mode="adaptive"):
         import torch
         import nodes
 
@@ -953,17 +953,20 @@ class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass
 
             # Step 3: Check if the target deviation is met or if max iterations are reached
             if std_diff <= target_deviation or iteration >= max_iters:
-                log+=f"std_diff <= target_deviation or iteration >= max_iters"
+                log += f"std_diff <= target_deviation or iteration >= max_iters"
                 break
 
             # Step 4: Identify and process top outliers
-            image_stack, top_outliers_count = self.process_top_outliers(image_stack, region_diff_norm, top_threshold, rife_vfi)
+            image_stack, top_outliers_count = self.process_top_outliers(image_stack, region_diff_norm, top_threshold,
+                                                                        rife_vfi)
 
             # Step 5: Identify and drop bottom outliers
-            image_stack, bottom_outliers_count = self.drop_bottom_outliers(image_stack, region_diff_norm, bottom_threshold)
+            image_stack, bottom_outliers_count = self.drop_bottom_outliers(image_stack, region_diff_norm,
+                                                                           bottom_threshold)
 
             # Log information
-            log += self.log_info(iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff, max_dev, stats_str)
+            log += self.log_info(iteration, top_outliers_count, bottom_outliers_count, mean_diff, std_diff, max_diff,
+                                 max_dev, stats_str)
 
             # Increment the iteration counter
             iteration += 1
@@ -972,11 +975,7 @@ class SmoothStackTemporal(ABCABCVideoFolderToImage, metaclass=ABCWidgetMetaclass
             if image_stack.shape[0] == 0:
                 return (None, "Image stack is empty after processing. No frames left.")
 
-
-
         return (image_stack.to(torch.float32), log)
-
-
 
 
 class MovingCircle(metaclass=ABCWidgetMetaclass):
@@ -1667,9 +1666,7 @@ class WhisperTranscription(metaclass=ABCWidgetMetaclass):
 
     def transcribe_movie(self, input_filename):
 
-        import folder_paths as fp
-        input_dir = fp.input_directory
-        full_path = os.path.join(input_dir, input_filename)
+        full_path = os.path.abspath(input_filename)
 
         try:
             segs = transcribe_to_segs(full_path)
@@ -1693,7 +1690,7 @@ class WhisperTranscription(metaclass=ABCWidgetMetaclass):
 
         except Exception as e:
             print(e)
-            return ("Error",)
+            return ("Error", str(e))
 
 
 class WhisperTranscribeToFrameIDXandWords(metaclass=ABCWidgetMetaclass):
