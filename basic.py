@@ -283,19 +283,75 @@ class IntBreakout:
         return ("\n".join(notes), out_bool, out_str, out_float, out_list, out_range, out_none,)
 
 
+class SelectStrFromDict:
+    """
+    Selects a string from a dictionary
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dict": ("DICT", {
+                    "default": {},
+                }),
+                "key": ("STRING", {
+                    "default": "",
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "get_value"
+    CATEGORY = "text"
+
+    def get_value(self, dict, key):
+        if key in dict:
+            return (dict[key],)
+        return ("",)
+
+
+class StringToAny:
+    """takes STRING, and returns the value coded as *"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "string": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("*", "STRING",)
+    RETURN_NAMES = ("*", "debug info",)
+    FUNCTION = "get_value"
+    CATEGORY = "conversion"
+
+    def get_value(self, string):
+        try:
+            ret_str = str(string)
+            dbg = f"found STRING: {string}"
+        except Exception as e:
+            ret_str = None
+            dbg = f"failed to verify STRING: {string} error: {e}"
+
+        return (ret_str, dbg,)
+
+
 class ValueToAny:
     """takes INT,STRING,FLOAT,BOOL, and returns the value coded as *"""
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {
+        ret = {
+            "required": {},
             "optional": {
-                "INT": ("INT", {"default": None, }),
-                "FLOAT": ("FLOAT", {"default": None, }),
-                "STRING": ("STRING", {"default": None, }),
-                "BOOL": ("BOOL", {"default": None, }),
-            }
-        }
+                "INT": ("INT", {"forceInput": True}),
+                "FLOAT": ("FLOAT", {"forceInput": True}),
+                "STRING": ("STRING", {"forceInput": True}),
+                "BOOL": ("BOOL", {"forceInput": True}),
+            }}
+        return ret
 
     RETURN_TYPES = ("*", "STRING",)
     RETURN_NAMES = ("*", "debug info",)
@@ -379,11 +435,15 @@ class ObjectToAny:
     @classmethod
     def INPUT_TYPES(cls):
         return {
+            "required": {
+                "label": ("STRING", {"default": "0", })},
             "optional": {
                 "LATENT": ("LATENT", {"default": None, }),
                 "CONDITIONING": ("CONDITIONING", {"default": None, }),
                 "IMAGE": ("IMAGE", {"default": None, }),
                 "MASK": ("MASK", {"default": None, }),
+                "CLIP": ("CLIP", {"default": None, }),
+                "MODEL": ("MODEL", {"default": None, }),
             }
         }
 
@@ -392,25 +452,44 @@ class ObjectToAny:
     FUNCTION = "get_value"
     CATEGORY = "conversion"
 
-    def get_value(self, LATENT=None, CONDITIONING=None, IMAGE=None, MASK=None):
+    def get_value(self, label,
+                  LATENT=None,
+                  CONDITIONING=None,
+                  IMAGE=None,
+                  MASK=None,
+                  CLIP=None,
+                  MODEL=None,
+                  ):
         if LATENT:
             dbg = f"found LATENT: {LATENT}"
             return (LATENT, dbg,)
+
         if CONDITIONING:
             dbg = f"found CONDITIONING: {CONDITIONING}"
             return (CONDITIONING, dbg,)
-        if IMAGE:
+
+        if IMAGE is not None:
             dbg = f"found IMAGE: {IMAGE}"
             return (IMAGE, dbg,)
+
         if MASK:
             dbg = f"found MASK: {MASK}"
             return (MASK, dbg,)
+
+        if MODEL:
+            dbg = f"found MODEL: {MODEL}"
+            return (MODEL, dbg,)
+        if CLIP:
+            dbg = f"found CLIP: {CLIP}"
+            return (CLIP, dbg,)
+
         dbg = f"found nothing, will return the first value that is not None; from LATENT,CONDITIONING,IMAGE,MASK"
         return (None, dbg)
 
 
 from torch import Tensor
 from comfy.model_patcher import ModelPatcher
+
 COMFY_PYTHON_CLAS_NAMES = {
     "INT": int,
     "FLOAT": float,
@@ -514,14 +593,13 @@ class AnyToObject:
     FUNCTION = "get_value"
     CATEGORY = "conversion"
 
-
     def get_value(self, Any):
         image_o = None
         latent_o = None
         conditioning_o = None
         model_o = None
 
-        if   isinstance(Any, COMFY_PYTHON_CLAS_NAMES['IMAGE']):
+        if isinstance(Any, COMFY_PYTHON_CLAS_NAMES['IMAGE']):
             image_o = Any
         elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['LATENT']):
             latent_o = Any
@@ -568,20 +646,72 @@ class TimeThis:
 
         if start:
             self.start_times[var_name] = time.time()
-            print (f"Timer started for {var_name}")
-            ret =  ("Timer started", 0.0, pass_through)
+            print(f"Timer started for {var_name}")
+            ret = ("Timer started", 0.0, pass_through)
         else:
             if var_name not in self.start_times:
                 return ("Timer not started", 0.0, pass_through)
             self.end_times[var_name] = time.time()
             time_diff = self.end_times[var_name] - self.start_times[var_name]
-            print (f"Timer ended for {var_name} time taken: {time_diff}")
-            ret =  (f"Time taken: {time_diff}", time_diff, pass_through)
+            print(f"Timer ended for {var_name} time taken: {time_diff}")
+            ret = (f"Time taken: {time_diff}", time_diff, pass_through)
 
         ret = {"ui": {"text": (ret[0],)}, "result": ret}
         return ret
 
-NODE_CLASS_MAPPINGS = {}
+
+class Text_ETK:
+    """
+    to provide text to the model
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "fun"
+    CATEGORY = "text"
+
+    def fun(self, text):
+        return (text,)
+
+
+class StringsToList:
+    """
+    take two strings and return them as a list
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "list": ("LIST", {"default": [], "forceInput": True}),
+                "string1": ("STRING", {"default": "", "forceInput": True}),
+            },
+            "optional": {
+                "string2": ("STRING", {"default": "", "forceInput": True}),
+            }
+
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "fun"
+    CATEGORY = "text"
+
+    def fun(self, list, string1, string2=""):
+        return (list + [string1, string2],)
+
+
+# from __init__ import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+NODE_CLASS_MAPPINGS["Text_ETK"] = Text_ETK
+NODE_CLASS_MAPPINGS["Text _O"] = Text_ETK
 NODE_CLASS_MAPPINGS["MultilineStringNode"] = MultilineStringNode
 NODE_CLASS_MAPPINGS["StrBreakout"] = StrBreakout
 NODE_CLASS_MAPPINGS["IntBreakout"] = IntBreakout
@@ -597,3 +727,7 @@ NODE_CLASS_MAPPINGS["AnyToIterable"] = AnyToIterable
 NODE_CLASS_MAPPINGS["TimeThis"] = TimeThis
 NODE_CLASS_MAPPINGS["AnyToObject"] = AnyToObject
 
+NODE_CLASS_MAPPINGS["SelectStrFromDict"] = SelectStrFromDict
+
+NODE_CLASS_MAPPINGS["StringToAny"] = StringToAny
+NODE_CLASS_MAPPINGS["StringsToList"] = StringsToList

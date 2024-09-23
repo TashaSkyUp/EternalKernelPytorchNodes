@@ -6,8 +6,9 @@ import joblib
 from .config import config_settings
 
 temp_dir = config_settings["tmp_dir"]
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+from  . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+#NODE_CLASS_MAPPINGS = {}
+#NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 # Create a memory object for caching

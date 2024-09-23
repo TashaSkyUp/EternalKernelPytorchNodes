@@ -1,14 +1,15 @@
 import hashlib
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+# NODE_CLASS_MAPPINGS = {}
+# NODE_DISPLAY_NAME_MAPPINGS = {}
 _list = {"list": ("LIST",)}
 _func = {"func": ("FUNC", {"default": None})}
 _func_extra = {"func_extra": ("FUNC",)}
 _text = {"code": ("STRING", {"multiline": True, "default": "y mapped to output"})}
 _image = {"image": ("IMAGE",)}
-_string = {"string": ("STRING", {"default": None})}
-_any = {"any": ("*", {"default": None})}
+_string = {"string": ("STRING", {"default": ""})}
+_any = {"any": ("*", {"default": ""})}
 
 optional = lambda x: {"optional": {k: v for k, v in x.items()}}
 required = lambda x: {"required": {k: v for k, v in x.items()}}
@@ -201,9 +202,7 @@ class ExecWidget:
         return {"optional":
             {
 
-                "code_str_in": ("STRING", {"multiline": True,
-                                           "default": ""
-                                           }),
+                "code_str_in": ("STRING", {"multiline": True, "default": ""}),
                 "image1_in": ("IMAGE",),
                 "float1_in": ("FLOAT", {"multiline": False}),
                 "string1_in": ("STRING", {"multiline": False}),
@@ -371,13 +370,19 @@ class FuncStrToStr:
 
 @ETK_functional_base
 class FuncStrToList:
+
     def __init__(self):
         pass
 
     @classmethod
     def INPUT_TYPES(cls):
-        req = required(both(_string, _text))
-        return req
+        out = {"required": {
+            "string": ("STRING", {"default": "", }),
+            "code": ("STRING", {"multiline": True, "default": "y mapped to output"})
+        }}
+
+
+        return out
 
     CATEGORY = "ETK/func"
     RETURN_TYPES = ("LIST",)
@@ -397,6 +402,7 @@ class FuncStrToList:
 
 @ETK_functional_base
 class FuncListToStr:
+    # class FuncStrToList:
     def __init__(self):
         pass
 
@@ -662,6 +668,52 @@ class FuncAnysToList:
         else:
             return (None,)
 
+@ETK_functional_base
+class FuncAnysToDict:
+    """runs eval on the given text, with 5 anys as input and outputs a list"""
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        req = optional(
+            both(
+                both({"any1": ("*", {"default": None})}, {"any2": ("*", {"default": None})}),
+                both({"any3": ("*", {"default": None})}, {"any4": ("*", {"default": None})})
+            ),
+        )
+        req["required"] = {}
+        req["required"].update(_text)
+
+        return req
+
+    CATEGORY = "ETK/func"
+    RETURN_TYPES = ("DICT",)
+    FUNCTION = "func"
+
+    def func(self, **kwargs):
+        code = kwargs.get("code", None)
+        any1 = kwargs.get("any1", None)
+        any2 = kwargs.get("any2", None)
+        any3 = kwargs.get("any3", None)
+        any4 = kwargs.get("any4", None)
+
+        my_globals = globals()
+        my_locals = {}
+
+        my_locals["any1"] = any1
+        my_locals["any2"] = any2
+        my_locals["any3"] = any3
+        my_locals["any4"] = any4
+
+        exec(code, my_globals, my_locals)
+        if "y" in my_locals.keys():
+            return (my_locals["y"],)
+        elif "y" in my_globals.keys():
+            return (my_globals["y"],)
+        else:
+            return (None,)
 
 @ETK_functional_base
 class FuncAnysToCond:
