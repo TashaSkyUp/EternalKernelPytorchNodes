@@ -7,8 +7,9 @@ import functools
 import torch
 import torchvision
 
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+#NODE_CLASS_MAPPINGS = {}
+#NODE_DISPLAY_NAME_MAPPINGS = {}
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
 
 def ETK_torchvision_base(cls):
@@ -80,7 +81,7 @@ class TorchVisionTransformNode:
                 "composition": ("TV_COMPOSITION_LIST", {"default": None}),
                 "transform": (c_list,),
             }, "optional": {
-                "args": ("STRING", {"default": None}),
+                "args": ("STRING", {"default": ""}),
             },
         }
 

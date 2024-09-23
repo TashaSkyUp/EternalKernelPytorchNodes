@@ -11,6 +11,7 @@ import shutil
 import fractions
 import os
 from abc import ABC, ABCMeta, abstractmethod
+from os.path import splitext, join
 from typing import List, Tuple, Union
 import cv2
 import torch
@@ -20,7 +21,7 @@ import torchaudio
 from torch import dtype
 # from custom_nodes.EternalKernelLiteGraphNodes.image import torch_image_show
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights, raft_small, Raft_Small_Weights
-from custom_nodes.EternalKernelLiteGraphNodes.modules.image_utils import lanczos_resize
+
 import os
 import torch
 from torchvision.utils import draw_keypoints
@@ -30,9 +31,11 @@ import numpy as np
 import cv2
 import subprocess
 import imageio_ffmpeg as ffmpeg
-from comfy_extras.nodes_video_model import SVD_img2vid_Conditioning
+# from comfy_extras.nodes_video_model import SVD_img2vid_Conditioning
 
-NODE_CLASS_MAPPINGS = {}  # this is the dictionary that will be used to register the nodes
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+# NODE_CLASS_MAPPINGS = {}  # this is the dictionary that will be used to register the nodes
 
 # setup directories
 root_p = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
@@ -1137,11 +1140,12 @@ class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
     """Combines lists of audio files and video files using imageio-ffmpeg"""
 
     @classmethod
-    def INPUT_TYPES(self):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "audio_files": ("LIST", {"default": []}),
                 "video_files": ("LIST", {"default": []}),
+                "resample": (["None", "video", "audio", ],),
                 "fps": ("FLOAT", {"default": 30, "min": 1, "max": 120}),
             },
             "optional": {
@@ -1166,41 +1170,81 @@ class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
         except subprocess.CalledProcessError:
             return False
 
+    import subprocess
+    import os
+    from os.path import splitext, join
+    import shutil
+
+    def get_duration(self, file):
+        """Get the duration of a file in seconds."""
+        command = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
+                   'default=nw=1:nk=1', file]
+        try:
+            output = subprocess.check_output(command, stderr=subprocess.STDOUT)
+            return float(output.strip())
+        except subprocess.CalledProcessError:
+            return None
+
     def handler(self, **kwargs):
-        from os.path import splitext, join
-        import shutil
         audio_files = kwargs["audio_files"]
         video_files = kwargs["video_files"]
         move_to_folder = kwargs.get("move_to_folder", "")
+        resample = kwargs.get("resample", "None")
+        fps = kwargs.get("fps", 30.0)
 
         combined_video_paths = []
-        video_audio_pairs = zip(video_files, audio_files)
+        video_audio_pairs = list(zip(video_files, audio_files))
 
         ffmpeg_exe = ffmpeg.get_ffmpeg_exe()
         if ffmpeg_exe is None:
             raise RuntimeError("FFmpeg could not be found.")
 
         for video_file, audio_file in video_audio_pairs:
+            video_file = f'{video_file}'
+            audio_file = f'{audio_file}'
 
-            video_out_file_fp = splitext(video_file)[0] + "_v_and_a.mp4"
+            video_out_file_fp = f'{splitext(video_file)[0]}_v_and_a.mp4'
             input_args = ['-i', video_file, '-i', audio_file]
 
             if self.has_audio_stream(video_file):
                 # The video has an audio stream, proceed with mixing
-                filter_complex_arg = ['-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest[a]']
+                filter_complex_arg = '[0:a][1:a]amix=inputs=2:duration=longest[a]'
                 output_args = ['-c:v', 'copy', '-map', '0:v:0', '-map', '[a]', '-c:a', 'aac', '-strict', 'experimental',
                                '-y', video_out_file_fp]
-
-
             else:
-                filter_complex_arg = []
+                filter_complex_arg = ''
                 output_args = ['-c:v', 'copy', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-strict',
                                'experimental', '-y', video_out_file_fp]
 
-            command = [ffmpeg_exe] + input_args + filter_complex_arg + output_args
-            cmd = ' '.join(command)
-            print(cmd)
-            os.system(cmd)
+            if resample == "video":
+                video_duration = self.get_duration(video_file)
+                audio_duration = self.get_duration(audio_file)
+
+                if video_duration and audio_duration:
+                    speed = audio_duration / video_duration
+                    filter_complex_arg = f'[0:v]setpts={speed}*PTS[v];[v][1:a]concat=n=1:v=1:a=1[v][a]'
+                    output_args = ['-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-c:a', 'aac', '-strict',
+                                   'experimental', '-y', video_out_file_fp]
+                else:
+                    raise RuntimeError("Could not determine duration of video or audio file.")
+            elif resample == "None":
+                output_args.extend(['-r', str(fps)])
+            elif resample == "audio":
+                # Not implemented: Finding silence in audio and removing it
+                raise NotImplementedError(
+                    "Resampling audio is not implemented. Consider finding silence in the audio and removing it.")
+
+            try:
+                # try to run it with the list of parts, using the list
+                if filter_complex_arg:
+                    commands_to_run = [ffmpeg_exe, *input_args, '-filter_complex', filter_complex_arg, *output_args]
+                else:
+                    commands_to_run = [ffmpeg_exe, *input_args, *output_args]
+
+                commands_to_run = [str(c).replace("\"", "") for c in commands_to_run]
+                subprocess.run(commands_to_run, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred: {e}")
 
             if move_to_folder:
                 destination_path = join(move_to_folder, os.path.basename(video_out_file_fp))
@@ -1211,6 +1255,10 @@ class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
                 combined_video_paths.append(destination_path)
             else:
                 combined_video_paths.append(video_out_file_fp)
+
+            os.chdir("..")
+            os.chdir("..")
+            os.chdir("..")
 
         return (combined_video_paths,)
 
@@ -1226,7 +1274,7 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
                 "fps/length": ("FLOAT", {"default": 30, "min": 1, "max": 10000000000}),
                 "bitrate": ("STRING", {"default": "20000k"}),
                 "codec": (
-                    ["libx264", "libx265", "mpeg4", "vp9", "huffyuv", "flv1", "h264_nvenc", "hevc_nvenc"],
+                    ["libx264", "libx265", "mpeg4", "vp9", "huffyuv", "flv1", "h264_nvenc", "hevc_nvenc", "rawvideo"],
                     {"default": "libx264"}
                 ),
                 "file_extension": (
@@ -1237,6 +1285,8 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
             },
             "optional": {
                 "[duration or fps]": ("LIST", {"default": []}),
+                "q": ("INT", {"default": 20, "min": 0, "max": 31}),
+                "pix_fmt": ("STRING", {"default": "yuv420p"}),
             },
         }
 
@@ -1247,61 +1297,74 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
     FUNCTION = "handler"
 
     def handler(self, **kwargs):
-        import imageio
-        import os
-        import time
-
-        start_time = time.time()
-
-        folders_with_frames = kwargs["folders_with_frames"]
-        fps_length_value = kwargs["fps/length"]
-        bitrate = kwargs["bitrate"]
-        codec = kwargs["codec"]
-        file_extension = kwargs["file_extension"]
-        fps_or_length = kwargs["fps or length"]
+        folders_with_frames = kwargs.get("folders_with_frames", [])
+        fps_length_value = kwargs.get("fps/length", 30)
+        file_extension = kwargs.get("file_extension", ".mkv")
+        fps_or_length = kwargs.get("fps or length", "fps")
         duration_or_fps_list = kwargs.get("[duration or fps]", [])
+        codec = kwargs.get("codec", "libx264")
+        q = kwargs.get("q", 20)
+        pix_fmt = kwargs.get("pix_fmt", "yuv420p")
 
         combined_video_paths = []
         messages = []
 
+        ffmpeg_exe = 'ffmpeg'  # Ensure ffmpeg is in your PATH or provide the full path to the ffmpeg executable
+        if not shutil.which(ffmpeg_exe):
+            raise RuntimeError("FFmpeg could not be found.")
+
         for i, folder_path in enumerate(folders_with_frames):
             try:
-                out_file = os.path.join(os.path.dirname(folder_path),
-                                        f"{os.path.basename(folder_path)}tmp_{i}{file_extension}")
-                frame_files = sorted(
-                    [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-
-                if not frame_files:
-                    messages.append(f"No frame files found in folder: {folder_path}")
-                    continue
-
-                if fps_or_length == "fps":
+                output_file = os.path.join(os.path.dirname(folder_path),
+                                           f"{os.path.basename(folder_path)}tmp_{i}{file_extension}")
+                if fps_or_length == 'fps':
                     fps = fps_length_value
                     if duration_or_fps_list:
                         fps = duration_or_fps_list[i]
-
                 else:
+                    frame_files = sorted(
+                        [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                    )
                     total_frames = len(frame_files)
                     fps = total_frames / fps_length_value if fps_length_value != 0 else 30
                     if duration_or_fps_list:
-                        # calculate the fps based on the duration
                         fps = total_frames / duration_or_fps_list[i]
 
-                writer = imageio.get_writer(out_file, fps=fps, codec=codec, bitrate=bitrate)
-
-                for frame_file in frame_files:
-                    frame_path = os.path.join(folder_path, frame_file)
-                    frame = imageio.imread(frame_path)
-                    writer.append_data(frame)
-
-                writer.close()
-                combined_video_paths.append(out_file)
+                create_video_from_images(folder_path, output_file, fps, codec, q, pix_fmt)
+                combined_video_paths.append(output_file)
             except Exception as e:
                 messages.append(f"Error processing folder {folder_path}: {str(e)}")
 
-        end_time = time.time()
-        print(f"Time taken for CombineFoldersWithFramesToVideoFiles: {end_time - start_time} seconds")
         return (combined_video_paths, "\n".join(messages),)
+
+
+def create_file_list(folder_path):
+    frame_files = sorted(
+        [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    )
+    list_file_path = os.path.join(folder_path, 'filelist.txt')
+    with open(list_file_path, 'w') as f:
+        for frame_file in frame_files:
+            f.write(f"file '{os.path.join(folder_path, frame_file)}'\n")
+    return list_file_path
+
+
+import subprocess
+
+
+def create_video_from_images(folder_path, output_file, fps, codec, q, pix_fmt):
+    list_file_path = create_file_list(folder_path)
+    ffmpeg_exe = 'ffmpeg'  # Ensure ffmpeg is in your PATH or provide the full path to the ffmpeg executable
+
+    command = [
+        ffmpeg_exe, '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
+        '-vf', f"fps={fps}", '-c:v', codec, '-pix_fmt', pix_fmt, "-qp", str(q), output_file
+    ]
+
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"ffmpeg failed with error: {e.stderr.decode()}")
 
 
 class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
@@ -2065,7 +2128,8 @@ class VideoFolderProvider(metaclass=ABCWidgetMetaclass):
     def INPUT_TYPES(cls):
         ret = {
             "required": {
-                "folder_path": ("STRING", {"default": None}),
+                "folder_path": ("STRING", {"default": ""}),
+                "clear_folder": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "activator:": ("*", {"default": None})
@@ -2099,19 +2163,20 @@ class VideoFolderProvider(metaclass=ABCWidgetMetaclass):
         if not accessible:
             raise ValueError("Folder for video files is not accessible")
 
-        # if the folder exists, delete all files in the folder
-        if folder_exists:
-            for file in files_in_folder:
-                # use shutil to remove the file
-                fl = os.path.join(kwargs["folder_path"], file)
-                if os.path.isfile(fl):
-                    os.remove(fl)
-                # use shutil to remove the entire path
-                check_this_path = file
-                if len(check_this_path) > 3:
-                    shutil.rmtree(check_this_path, ignore_errors=True)
-                else:
-                    raise ValueError("Folder path is too short")
+        if kwargs["clear_folder"]:
+            # if the folder exists, delete all files in the folder
+            if folder_exists:
+                for file in files_in_folder:
+                    # use shutil to remove the file
+                    fl = os.path.join(kwargs["folder_path"], file)
+                    if os.path.isfile(fl):
+                        os.remove(fl)
+                    # use shutil to remove the entire path
+                    check_this_path = file
+                    if len(check_this_path) > 3:
+                        shutil.rmtree(check_this_path, ignore_errors=True)
+                    else:
+                        raise ValueError("Folder path is too short")
 
         # if the folder does not exist, create the folder
 
@@ -2128,7 +2193,8 @@ class AudioFolderProvider(metaclass=ABCWidgetMetaclass):
     def INPUT_TYPES(cls):
         ret = {
             "required": {
-                "folder_path": ("STRING", {"default": None}),
+                "folder_path": ("STRING", {"default": ""}),
+                "clear_folder": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "activator:": ("*", {"default": None})
@@ -2162,15 +2228,14 @@ class AudioFolderProvider(metaclass=ABCWidgetMetaclass):
         if not accessible:
             raise ValueError("Folder for audio files is not accessible")
 
-        # if the folder exists, delete all files in the folder
-        if folder_exists:
-            for file in files_in_folder:
-                # use shutil to remove the file
-                fl = os.path.join(kwargs["folder_path"], file)
-                if os.path.isfile(fl):
-                    os.remove(fl)
-
-        # if the folder does not exist, create the folder
+        if kwargs["clear_folder"]:
+            # if the folder exists, delete all files in the folder
+            if folder_exists:
+                for file in files_in_folder:
+                    # use shutil to remove the file
+                    fl = os.path.join(kwargs["folder_path"], file)
+                    if os.path.isfile(fl):
+                        os.remove(fl)
 
         return (kwargs["folder_path"],)
 
@@ -2288,6 +2353,7 @@ class AddAudioToAudioFolder(metaclass=ABCWidgetMetaclass):
         # check each file in the list to make sure we can convert it to the correct format
         import shutil
         import os
+        from subprocess import run
 
         ffmpeg_exe = ffmpeg.get_ffmpeg_exe()
 
@@ -2307,9 +2373,11 @@ class AddAudioToAudioFolder(metaclass=ABCWidgetMetaclass):
             output_file_name = audio_folder_def.get_next_file_name()
             input_file_name = audio_file
 
-            CMD = f"{ffmpeg_exe} -y -i {input_file_name} -ar {audio_folder_def['sample rate']} -ac {audio_folder_def['channels']} {output_file_name}"
+            CMD = f"{ffmpeg_exe} -y -i {input_file_name} -ar {audio_folder_def['sample rate']} -ac {audio_folder_def['channels']} '{output_file_name}'"
+            CMD_AS_LIST = [ffmpeg_exe, "-y", "-i", input_file_name, "-ar", str(audio_folder_def['sample rate']), "-ac",
+                           str(audio_folder_def['channels']), output_file_name]
 
-            os.system(CMD)
+            run(CMD_AS_LIST)
             if delete:
                 os.remove(input_file_name)
 
@@ -2605,6 +2673,7 @@ class AddFramesToVideoFolder(metaclass=ABCWidgetMetaclass):
         import gc
         from torchvision.transforms.functional import resize
         import psutil
+        from custom_nodes.EternalKernelLiteGraphNodes.modules.image_utils import lanczos_resize
 
         initial_memory = psutil.virtual_memory().available
         print(f"Initial free memory: {initial_memory / (1024 * 1024):.2f} MB")
@@ -2688,8 +2757,8 @@ class AddFramesToVideoFolder(metaclass=ABCWidgetMetaclass):
 
             torch.cuda.empty_cache()
             gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
+            # torch.cuda.empty_cache()
+            # gc.collect()
 
         initial_memory = psutil.virtual_memory().available
         print(f"after adding frames free memory: {initial_memory / (1024 * 1024):.2f} MB")
@@ -2868,6 +2937,9 @@ class Listed_HoldFramesForSecsInVideoFolder(metaclass=ABCWidgetMetaclass):
         # the plan is to call HoldFrameForSecsInVideoFolder for each frame and duration
         # and then return the video_folder_def
 
+        if "IMAGE" not in kwargs or "seconds" not in kwargs:
+            return (kwargs["video_folder_def"],)
+
         for frame, duration in zip(kwargs["IMAGE"], kwargs["seconds"]):
             HoldFrameForSecsInVideoFolder().hold_frame_for_secs_in_video_folder(
                 video_folder_def=kwargs["video_folder_def"],
@@ -2988,6 +3060,7 @@ class ListedSVDConditioning(metaclass=ABCWidgetMetaclass):
 
     @classmethod
     def INPUT_TYPES(cls):
+        from comfy_extras.nodes_video_model import SVD_img2vid_Conditioning
         base = SVD_img2vid_Conditioning.INPUT_TYPES()
         base["required"]["init_image"] = ("LIST", {"default": None})
         # base["required"]["clip_vision"] = ("LIST", {"default": None})

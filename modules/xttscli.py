@@ -43,7 +43,7 @@ def generate_xtts(**kwargs):
         texts = text
 
     o_files = []
-    batch_size = 2
+    batch_size = 4
     with ProcessPoolExecutor(max_workers=batch_size) as executor:
         futures = []
         for i, text in enumerate(texts):

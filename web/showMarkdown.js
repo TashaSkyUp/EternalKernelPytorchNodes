@@ -1,7 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
-import marked from "./marked.js";
-
+import Marked from "./marked.js";
 
 
 // Displays input markdown on a node
@@ -29,7 +28,7 @@ app.registerExtension({
                 const w = ComfyWidgets["STRING"](this, "markdown", ["STRING", { multiline: true }], app).widget;
 
                 // Convert markdown to HTML
-                const html = marked(list);
+                const html = Marked(list);
 
                 // Create a new div element to hold the rendered markdown
                 const div = document.createElement("div");

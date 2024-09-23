@@ -18,7 +18,12 @@ class GDELogin {
     }
 
     initElements() {
-        this.login_div = this.createElement("div", {id: "gde-login"});
+        this.login_form = this.createElement("form", {id: "gde-login"});
+        // make sure the form doesnt cause the page to reload
+        this.login_form.addEventListener("submit", (event) => {
+            event.preventDefault();
+        });
+        //this.login_div = this.createElement("div", {id: "gde-login"});
         this.usernameField = this.createInputField("username-field", "Username");
         this.passwordField = this.createInputField("password-field", "Password", "password");
         this.loginButton = this.createButton("login-button", "Login", this.handleLogin.bind(this));
@@ -95,7 +100,7 @@ class GDELogin {
                 id: "welcome-message",
                 innerText: `Welcome ${this.usernameField.value}`
             });
-            this.login_div.append(welcomeMessage);
+            this.login_form.append(welcomeMessage);
         }
 
 
@@ -121,12 +126,12 @@ class GDELogin {
         this.usernameField.remove();
         this.passwordField.remove();
         this.loginButton.remove();
-        this.login_div.append(this.logoutButton);
+        this.login_form.append(this.logoutButton);
     }
 
     switchToLoginView() {
         this.logoutButton.remove();
-        this.login_div.append(this.usernameField, this.passwordField, this.loginButton);
+        this.login_form.append(this.usernameField, this.passwordField, this.loginButton);
     }
 
     clearDropdowns() {
@@ -174,15 +179,15 @@ class GDELogin {
             separator.style.margin = "20px 0";
             separator.style.width = "100%";
             menu.append(separator);
-            menu.append(this.login_div);
+            menu.append(this.login_form);
 
             if (logged_in) {
-                this.login_div.append(this.logoutButton);
+                this.login_form.append(this.logoutButton);
 
             } else {
-                this.login_div.append(this.usernameField);
-                this.login_div.append(this.passwordField);
-                this.login_div.append(this.loginButton);
+                this.login_form.append(this.usernameField);
+                this.login_form.append(this.passwordField);
+                this.login_form.append(this.loginButton);
 
             }
         });
@@ -338,20 +343,36 @@ app.registerExtension({
 
         const handleGraphCreateNew = (event, dropdown) => {
             // Custom logic for when "Create New" is selected in the branch dropdown
-
-            showModal('graph-name-field')
+            showModal('graph-name-field');
             dropdown.disabled = true;
 
             const modal = document.getElementById("graph-name-modal");
-            // hijack its onsubmit function
+            // Hijack its onsubmit function
             const prev_submit = modal.submit;
-            //submitButton.onclick
+
             modal.submit = () => {
                 let graphName = prev_submit();
-                gdeState.graph = graphName;
-                dropdown.disabled = false;
+                if (graphName) {
+                    // Add the new graph to the dropdown
+                    const optionElement = document.createElement("option");
+                    optionElement.value = graphName;
+                    optionElement.textContent = graphName;
+                    dropdown.append(optionElement);
 
-            }
+                    // Set the new graph as the selected value
+                    dropdown.value = graphName;
+                    gdeState.graph = graphName;
+
+                    // Dispatch a custom event to notify other parts of the application
+                    const graphChangeEvent = new CustomEvent('graphChangeEvent', {
+                        detail: {
+                            graph: graphName
+                        }
+                    });
+                    document.dispatchEvent(graphChangeEvent);
+                }
+                dropdown.disabled = false;
+            };
         };
         const handleGraphSelect = (event, dropdown) => {
             // change gdeState.graph when it is changed
