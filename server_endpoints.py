@@ -1,5 +1,5 @@
 from .config import config_settings
-
+from .utils import FileBackedDict
 import json
 from server import PromptServer
 from aiohttp import web
@@ -7,7 +7,9 @@ from importlib import reload
 import logging
 import os
 from folder_paths import output_directory, input_directory, temp_directory
-from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
+# from custom_nodes.EternalKernelLiteGraphNodes.local_shared import GDE_PATH, ETK_PATH
+from .local_shared import GDE_PATH, ETK_PATH
+from .config import config_settings
 
 fake_git = None
 
@@ -24,8 +26,7 @@ class GitIO:
     def setup_git_io(self, l_real_git_url: str):
         git_name = l_real_git_url.split("/")[-1].split(".")[0]
 
-        real_git_path = os.path.join(self.gde_path, "data","gitio",git_name)
-
+        real_git_path = os.path.join(self.gde_path, "data", "gitio", git_name)
 
         # users_gitio_path = os.path.abspath(os.path.join(
         #     GDE_PATH,
@@ -184,7 +185,7 @@ class GitIO:
 
 git_io = None
 
-user_data = {
+user_data_base = {
     "tasha_StSq": {
         "password": "[REDACTED]",
         "security": None,
@@ -204,6 +205,12 @@ user_data = {
         "git_io": "HMG"
     },
 }
+tmp_dir = config_settings["tmp_dir"]
+user_data_file = os.path.join(tmp_dir, 'user_data_tmp.json')
+user_data = FileBackedDict(user_data_file)
+
+if len(user_data.keys()) == 0:
+    user_data.update(user_data_base)
 
 
 def get_user_by_client_id(client_id):
@@ -321,16 +328,16 @@ async def login(request):
 
     global git_io
 
-    #from . import config
-    #config_settings = config.config_settings
+    # from . import config
+    # config_settings = config.config_settings
 
     users_gitio = user_data[user]["git_io"]
 
-    #users_gitio_path = os.path.abspath(os.path.join(
+    # users_gitio_path = os.path.abspath(os.path.join(
     #    GDE_PATH,
     #    config_settings["gitio"]["base"],
     #    users_gitio)
-    #)
+    # )
 
     try:
         users_gittio_url = config_settings["gitio"][users_gitio]

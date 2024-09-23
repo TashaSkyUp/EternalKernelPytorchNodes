@@ -1,65 +1,14 @@
-import os
-
+import torch
+from PIL import Image
+import numpy as np
 import comfy
-
-try:
-    from line_profiler_pycharm import profile
-except ImportError as e:
-    print("ETK> line_profiler_pycharm not found, skipping it")
-    profile = lambda x: x
-
-try:
-    from utils import etk_deep_copy as deepcopy
-except ImportError as e:
-    from custom_nodes.EternalKernelLiteGraphNodes.utils import etk_deep_copy as deepcopy
-
-testing = os.environ.get("ETERNAL_KERNEL_LITEGRAPH_NODES_TEST", None)
-if testing == "True":
-    testing = True
-elif __name__ == "__main__":
-    testing = True
-else:
-    testing = False
-
-if testing:
-    class SaveImage:
-        def __init__(self):
-            pass
-
-        def __call__(self, *args, **kwargs):
-            pass
-else:
-    try:
-        from nodes import VAEDecode, KSampler, CheckpointLoaderSimple, EmptyLatentImage, CLIPTextEncode, VAEDecode, \
-            VAEEncode, PreviewImage
-        from nodes import CLIPTextEncode, VAEEncode, SaveImage
-
-        from nodes import common_ksampler
-
-        import comfy.samplers
-    except ImportError as e:
-        print("ETK> comfy.samplers not found, skipping comfyui")
-
-
-        class SaveImage:
-            def __init__(self):
-                pass
-
-            def __call__(self, *args, **kwargs):
-                pass
-
-try:
-    from custom_nodes.ComfyUI_ADV_CLIP_emb.nodes import AdvancedCLIPTextEncode as CLIPTextEncodeAdvanced
-except ImportError as e:
-    print("ETK> advanced clip not found, skipping it")
-
 import folder_paths
 import torch
 import torchvision
 import os
 import hashlib
 
-### info for code completion AI ###
+# info for code completion AI ###
 """
 all of these classes are plugins for comfyui and follow the same pattern
 all of the images are torch tensors and it is unknown and unimportant if they are on the cpu or gpu
@@ -67,8 +16,16 @@ all image inputs are (B,W,H,C)
 
 avoid numpy and PIL as much as possible
 """
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+
+try:
+    from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+except ImportError:
+    NODE_CLASS_MAPPINGS = {}
+    NODE_DISPLAY_NAME_MAPPINGS = {}
+
+
+# NODE_CLASS_MAPPINGS = {}
+# NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 # def ETK_image_base(cls):
@@ -177,6 +134,109 @@ def torch_image_show(image):
 
 
 @ETK_image_base
+class LoadImageFromPath:
+    """receives a comfyui "IMAGE" tensor of BHWC and a path to a file converts the tensor to a PIL image and saves it to the path"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "path": ("STRING", {"default": "output/image.png"}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("saved_path",)
+    FUNCTION = "execute"
+    OUTPUT_NODE = True
+
+    def execute(self, image: torch.Tensor, path: str):
+        from PIL import Image
+        import numpy as np
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert torch tensor to PIL Image
+        pil_image = Image.fromarray((image.squeeze().cpu().numpy() * 255).astype(np.uint8))
+
+        # Save image
+        pil_image.save(path)
+
+        return (str(path),)
+
+
+@ETK_image_base
+class SaveImageToPath:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "path": ("STRING", {"default": "output/image.png"}),
+                "save_sequence": ("BOOLEAN", {"default": False}),
+                "image_format": (["png", "jpg", "bmp"], {"default": "png"}),
+                "jpg_quality": ("INT", {
+                    "default": 70,
+                    "min": 0,
+                    "max": 100,
+                    "step": 1,
+                }),
+                "png_compression": ("INT", {
+                    "default": 5,
+                    "min": 1,
+                    "max": 9,
+                    "step": 1,
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LIST",)
+    RETURN_NAMES = ("saved_paths",)
+    FUNCTION = "execute"
+    OUTPUT_NODE = True
+
+    def execute(self, image: torch.Tensor, path: str, save_sequence: bool, image_format: str, jpg_quality: int,
+                png_compression: int):
+        import numpy as np
+        from PIL import Image
+        from pathlib import Path
+
+        save_paths = []
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        for i, img in enumerate(image):
+            # Convert torch tensor to PIL Image
+            pil_image = Image.fromarray((img.squeeze().cpu().numpy() * 255).astype(np.uint8))
+
+            # Determine file path
+            if save_sequence:
+                file_path = path.with_stem(f"{path.stem}_{i:06d}")
+            elif image.shape[0] > 1:
+                file_path = path.with_stem(f"{path.stem}_{i}")
+            else:
+                file_path = path
+
+            # Ensure correct file extension
+            file_path = file_path.with_suffix(f".{image_format}")
+
+            # Save image
+            if image_format == "jpg":
+                pil_image.save(file_path, quality=jpg_quality, optimize=True)
+            elif image_format == "png":
+                pil_image.save(file_path, compress_level=png_compression)
+            else:  # bmp
+                pil_image.save(file_path)
+
+            save_paths.append(str(file_path))
+
+        return (save_paths,)
+
+
+@ETK_image_base
 class TinyTxtToImg:
     """small text to image generator"""
     share_clip = None
@@ -238,6 +298,7 @@ class TinyTxtToImg:
 
     def tinytxt2img(self, **kwargs):
         """ use the imports from nodes to generate an image from text """
+        from nodes import CLIPTextEncode
         import comfy.model_management as mm
         import random
         import json
@@ -274,6 +335,7 @@ class TinyTxtToImg:
             self.vae = vae
             self.clp = clip
         else:
+            from nodes import CheckpointLoaderSimple
             self.mdl, self.clp, self.vae = \
                 CheckpointLoaderSimple.load_checkpoint(None,
                                                        ckpt_name=ckpt_name
@@ -324,7 +386,8 @@ class TinyTxtToImg:
                         self.__setattr__(k, v)
                     else:
                         print(f"invalid override key: {k}")
-        ## TODO: probably need to prepare the execution better to make sure that applying the incomming func can change everything
+        # TODO: probably need to prepare the execution better to make sure that applying the incomming func can
+        #  change everything
         if FUNC is not None:
             self.__dict__.update(FUNC(self.__dict__))
 
@@ -353,6 +416,7 @@ class TinyTxtToImg:
             torch.cuda.empty_cache()
             gc.collect()
         if self.latent_image == None:
+            from nodes import EmptyLatentImage
             self.latent_image = EmptyLatentImage().generate(self.width, self.height, self.batch_size)[0]
 
         if "latent" in render_what or "all" in render_what or "image" in render_what:
@@ -429,39 +493,6 @@ class TinyTxtToImg:
             torch.cuda.empty_cache()
             gc.collect()
         return ret
-
-
-@ETK_image_base
-class PreviewImageTest(SaveImage):
-    def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
-        self.type = "temp"
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-            "required": {
-                "images": ("IMAGE",),
-            },
-            "optional": {
-                "prompt": ("STRING", {"multiline": True}),
-                "neg_prompt": ("STRING", {"multiline": True}),
-                "clip_encoder": (["comfy -ignore below", "advanced"],),
-                "token_normalization": (["none", "mean", "length", "length+mean"],),
-                "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],)
-            },
-        }
-
-    def myfunc(self, images, prompt=None, extra_pnginfo=None, ret=None):
-        return ret
-
-    CATEGORY = "ETK/image"
-
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **kwargs):
-        ret = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
-        my_ret = self.myfunc(images, prompt, extra_pnginfo, ret)
-        return my_ret
 
 
 @ETK_image_base
@@ -605,28 +636,28 @@ class SelectFromRGBSimilarity:
                 "image": ("IMAGE",),
 
                 "r": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.1
+                    "default": 0.500,
+                    "min": 0.000,
+                    "max": 1.000,
+                    "step": 0.001
                 }),
                 "g": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.1
+                    "default": 0.500,
+                    "min": 0.000,
+                    "max": 1.000,
+                    "step": 0.001
                 }),
                 "b": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.1
+                    "default": 0.500,
+                    "min": 0.000,
+                    "max": 1.000,
+                    "step": 0.001
                 }),
                 "similarity": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.01
+                    "default": 0.500,
+                    "min": 0.000,
+                    "max": 1.000,
+                    "step": 0.001
                 })
             }
         }
@@ -1600,7 +1631,7 @@ class ETKKSampler:
     CATEGORY = "sampling"
 
     def sample(self, **kwargs):
-
+        from nodes import common_ksampler
         # kwargs = deepcopy(kwargs)
 
         model = kwargs.get("model", None)
@@ -1619,6 +1650,7 @@ class ETKKSampler:
         # self.ARGS = kwargs
 
         try:
+
             ret = common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, one_seed_per_batch=one_seed_per_batch)
         except TypeError as e:
@@ -1663,6 +1695,92 @@ class ListKSampler:
 
     def sample(self, **kwargs):
         import torch
+        import random
+        # figure out how many samples we need to generate
+        defaults = {
+            "seed": [-1],
+            "steps": [15],
+            "cfg": [1.0],
+            "denoise": [1.0],
+            "one_seed_per_batch": [False]
+        }
+        for k in defaults:
+            if k not in kwargs:
+                kwargs[k] = defaults[k]
+        num_samples = 1
+
+        for key in kwargs:
+            if key == "model":
+                continue
+            elif key == "sampler_name" or key == "scheduler":
+                kwargs[key] = [kwargs[key]]
+            if kwargs[key] is not None:
+                num_samples = max(num_samples, len(kwargs[key]))
+
+        # create a list of dictionaries
+        samples = []
+        for i in range(num_samples):
+            sample = {}
+            for key, v in kwargs.items():
+                if v is None:
+                    v = defaults[key]
+
+                if not isinstance(kwargs[key], list) and key != "model":
+                    kwargs[key] = [v]
+                if key == "model":
+                    sample[key] = v
+                elif key == "seed":
+                    if v in [[-1], [0], [None]]:
+                        sample[key] = random.randint(0, int(10e10 + 1))
+                    else:
+                        sample[key] = v
+                elif len(v) == 1:
+                    sample[key] = v[0]
+                else:
+                    sample[key] = v[i]
+            samples.append(sample)
+
+        # create a list of results
+        results = []
+        local_ksampler = ETKKSampler()
+        for sample in samples:
+            results.append(local_ksampler.sample(**sample)[0])
+        torch.cuda.empty_cache()
+
+        return (results,)
+
+
+@ETK_image_base
+class ListCustomSampler:
+    """
+    A Custom sampler that takes a list for every input, if the list has one element it will be repeated for every sample
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        s1 = ETKKSampler.INPUT_TYPES()["required"]["sampler_name"]
+        s2 = ETKKSampler.INPUT_TYPES()["required"]["scheduler"]
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "add_noise": ("BOOLEAN", {"default": True}),
+                "sampler": ("SAMPLER",),
+                "sigmas": ("SIGMAS",),
+                "noise_seed": ("LIST",),
+                "cfg": ("LIST",),
+                "positive": ("LIST",),
+                "negative": ("LIST",),
+                "latent_image": ("LIST",),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "sample"
+
+    CATEGORY = "sampling"
+
+    def sample(self, **kwargs):
+        import torch
         # figure out how many samples we need to generate
         num_samples = 1
         for key in kwargs:
@@ -1670,8 +1788,10 @@ class ListKSampler:
                 continue
             elif key == "sampler_name" or key == "scheduler":
                 continue
-            if kwargs[key] is not None:
+            if isinstance(kwargs[key], list):
                 num_samples = max(num_samples, len(kwargs[key]))
+            else:
+                pass
 
         # create a list of dictionaries
         samples = []
@@ -1692,7 +1812,8 @@ class ListKSampler:
 
         # create a list of results
         results = []
-        local_ksampler = ETKKSampler()
+        from comfy_extras.nodes_custom_sampler import SamplerCustom
+        local_ksampler = SamplerCustom()
         for sample in samples:
             results.append(local_ksampler.sample(**sample)[0])
         torch.cuda.empty_cache()
@@ -1741,6 +1862,7 @@ class ListCLIPTextEncode:
         # create a list of results
         results = []
         for sample in samples:
+            from nodes import CLIPTextEncode
             results.append(CLIPTextEncode().encode(**sample)[0])
 
         return (results,)
@@ -1766,12 +1888,14 @@ class ListVAEDecode:
             }
         }
 
-    RETURN_TYPES = ("LIST",)
+    RETURN_TYPES = ("LIST", "IMAGE",)
     FUNCTION = "decode"
 
     CATEGORY = "VAE"
 
     def decode(self, **kwargs):
+        from nodes import VAEDecode
+        import torch
         # figure out if we are using the list of vae or just one
         if kwargs.get("vae_list") is None:
             kwargs["vae"] = [kwargs.get("vae")]
@@ -1801,9 +1925,24 @@ class ListVAEDecode:
         results = []
         for sample in samples:
             sample["samples"] = sample.pop("latent")
+
             results.append(VAEDecode().decode(**sample)[0])
 
-        return (results,)
+        # the results are a list of image tensors (BHWC) float 0-1
+        # we need to stack them into a single tensor but first pre-allocte the tensor
+        # we need to figure out the size of the tensor, we know though that all images are the same size
+        size = results[0].shape
+        width = size[1]
+        height = size[2]
+        channels = size[3]
+        num_images = len(results)
+
+        # also need to specify to make the final tensor on the CPU
+        final_tensor = torch.zeros((num_images, width, height, channels), device="cpu")
+        for i in range(num_images):
+            final_tensor[i, :, :, :] = results[i]
+
+        return (results, final_tensor,)
 
 
 @ETK_image_base
@@ -1936,11 +2075,6 @@ class ListifyAnything:
         return ([anything] * repeat,)
 
 
-from PIL import Image
-import torch
-import numpy as np
-
-
 @ETK_image_base
 class TextRender:
     """
@@ -1994,7 +2128,7 @@ class TextRender:
                 "stroke width": ("INT", {"default": 1, "min": 1, "max": 100, "step": 1}),
             },
             "optional": {
-                "font_override": ("STRING", {"default": None}),
+                "font_override": ("STRING", {"default": ""}),
             }
         }
 
@@ -2005,7 +2139,6 @@ class TextRender:
 
     FUNCTION = "render_text"
 
-    @profile
     def render_text(self, text, x, y, width, height, font='Arial', size=16, color='#888888', func_only=False, **kwargs):
         """
         This function renders the provided text at specified location, with the given width and height.
@@ -2024,7 +2157,6 @@ class TextRender:
         sw = kwargs.get("stroke width", None)
         sf = kwargs.get("stroke fill", None)
 
-        @profile
         def _wrap_text(font, line, max_width, d):
             words = line.split(' ')
             new_line = ''
@@ -2050,7 +2182,6 @@ class TextRender:
             wrapped_line = '\n'.join(lines)
             return wrapped_line
 
-        @profile
         def _render_text(font_name, image, size, text, x, y, allow_wrap=True, allow_shrink=True, sw=None, sf=None):
             width = image.size[0]
             d = ImageDraw.Draw(image)
@@ -2239,25 +2370,31 @@ class FuncImageStackToImageStack:
         image_x = kwargs.get("image", None)
         # gs = image_x.mean(dim=3).repeat(1, 1, 1, 3)
 
-        my_locals["x"] = func
+        # my_locals["x"] = func
         my_locals["x_image"] = kwargs.get("image", None)
+        my_locals["x"] = kwargs.get("image", None)
 
         exec(code, my_globals, my_locals)
 
-        return (my_locals["y_image"],)
+        y_image = my_locals.get("y_image", None)
+        y = my_locals.get("y", None)
+
+        out_y = y_image if y_image is not None else y
+
+        return (out_y,)
 
 
 @ETK_image_base
 class ScaleLatentChannelwise:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required":
-                    {"latent": ("LATENT",),
-                     "w1": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
-                     "w2": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
-                     "w3": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
-                     "w4": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
-                     }}
+        return {"required": {
+            "latent": ("LATENT",),
+            "w1": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+            "w2": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+            "w3": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+            "w4": ("FLOAT", {"min": -2, "max": 2, "default": 1, "step": 0.05}),
+        }}
 
     RETURN_TYPES = ("LATENT",)
 
@@ -3007,7 +3144,7 @@ class ImageGrid:
         tot_images = len(image)
         if max_idx < tot_images:
             raise ValueError("not enough grid space to show all images")
-        
+
         for idx in range(len(image)):
             x, y = self.get_xy_for_idx(idx, rows, cols)
             x_pix = col_x_pix[x]
@@ -3045,41 +3182,271 @@ class QueryImage:
         return (result["result"],)
 
 
+@ETK_image_base
+class CLIPSegAdv:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "text": ("STRING", {"default": "", "multiline": False}),
+                "use_cuda": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "clipseg_model": ("CLIPSEG_MODEL",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "apply_transform"
+
+    CATEGORY = "image/transformation"
+
+    def x28_model(self, model, processor, num):
+        # takes an initialized model and processor and integrates it into a nn.module to run in paralell
+        from torch import nn
+        class x28_model(nn.Module):
+            def __init__(self, model, processor, overlap=64, slice_size=352):
+                super(x28_model, self).__init__()
+                self.model = model
+                self.processor = processor
+                self.mask = None
+
+                # Create a blending mask
+                self.mask = np.ones((slice_size, slice_size))
+                self.mask[:overlap, :] *= np.linspace(0, 1, overlap)[:, None]
+                self.mask[-overlap:, :] *= np.linspace(1, 0, overlap)[:, None]
+                self.mask[:, :overlap] *= np.linspace(0, 1, overlap)[None, :]
+                self.mask[:, -overlap:] *= np.linspace(1, 0, overlap)[None, :]
+                self.mask = torch.tensor(self.mask, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+
+            def forward(self, image, text, boxs):
+                import torch
+                image = image.permute(0, 3, 1, 2).to(torch.float32) * 255
+                out_image = image.clone() * 0
+
+                for i, bc in enumerate(boxs):
+                    with torch.no_grad():
+                        # img = image[:, :, bc[0]:bc[1], bc[2]:bc[3]]
+
+                        inputs = processor(text=text, images=image[:, :, bc[0]:bc[1], bc[2]:bc[3]], return_tensors="pt")
+
+                        result = self.model(**inputs)
+                        t = torch.sigmoid(result[0])
+                        mask = (t - t.min()) / t.max()
+                        mask = mask.unsqueeze(0)
+
+                        mask = mask.repeat(1, 3, 1, 1)
+                        out_image[:, :, bc[0]:bc[1], bc[2]:bc[3]] += (mask * self.mask)
+
+                return out_image
+
+        mdl = x28_model(model, processor, num)
+        return mdl
+
+    def apply_transform(self, image, text, use_cuda, clipseg_model):
+        import torch
+        import torch.nn.functional as F
+        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+
+        B, H, W, C = image.shape
+        aspect = H / W
+
+        if B != 1:
+            raise NotImplementedError("Batch size must be 1")
+
+        # Desired slice size and overlap
+        slice_size = 352
+        overlap = slice_size // 2
+        overlap = 32
+
+        # num_slices_w, slices = self.get_slices(image, overlap, slice_size)
+        # just support landscape, square or portrait images
+        # 4x7=28, 5x5=25, 7x4=28
+        if aspect < 1.25:
+            num_slices_w = 3 * 2
+            num_slices_h = 2 * 2
+        elif aspect > 0.75:
+            num_slices_w = 2 * 2
+            num_slices_h = 3 * 2
+        else:
+            num_slices_w = 3 * 2
+            num_slices_h = 3 * 2
+
+        model, processor = self.get_models(clipseg_model, use_cuda)
+
+        image_global = image.permute(0, 3, 1, 2)
+        image_global = F.interpolate(image_global, size=(num_slices_h * slice_size, num_slices_w * slice_size),
+                                     mode='bilinear',
+                                     align_corners=False)
+        image_global = image_global.permute(0, 2, 3, 1)
+        image_global = self.get_global_prediction(image_global, model, processor, slice_size, text, use_cuda)
+
+        # _, slices = self.get_slices(image_global, overlap, slice_size)
+        slc_boxs = self.get_slice_boxs(image_global, overlap, slice_size)
+
+        modelx28 = self.x28_model(model, processor, num=len(slc_boxs))
+
+        # Apply the transformation to each slice
+        transformed_image = modelx28.forward(image_global, text, slc_boxs)
+
+        transformed_image = transformed_image.permute(0, 2, 3, 1)
+
+        y = transformed_image
+
+        total_power = (y + image_global) / 2
+        just_black = image_global < 0.01
+
+        p1 = total_power > .5
+        p2 = y > .5
+        p3 = image_global > .5
+
+        condition = p1 | p2 | p3
+        condition = condition & ~just_black
+        y = torch.where(condition, 1.0, 0.0)
+
+        return (y,)
+
+    def get_global_prediction(self, image, model, processor, slice_size, text, use_cuda):
+        from torch import nn
+        import torch.nn.functional as F
+        B, H, W, C = image.shape
+
+        image_global = image.permute(0, 3, 1, 2)
+        image_global = F.interpolate(image_global, size=(slice_size, slice_size), mode='bilinear', align_corners=False)
+        image_global = image_global.permute(0, 2, 3, 1)
+        _, image_global = self.CLIPSeg_image(image_global.float(), text, processor, model, use_cuda)
+        image_global = image_global.permute(0, 3, 1, 2)
+        image_global = F.interpolate(image_global, size=(H, W), mode='bilinear', align_corners=False)
+        image_global = image_global.permute(0, 2, 3, 1)
+        return image_global
+
+    def get_models(self, clipseg_model, use_cuda):
+        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+        # Initialize CLIPSeg model and processor
+        if clipseg_model:
+            processor = clipseg_model[0]
+            model = clipseg_model[1]
+        else:
+            processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+            model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+        # Move model to CUDA if requested
+        if use_cuda and torch.cuda.is_available():
+            model = model.to('cuda')
+        processor.image_processor.do_rescale = True
+        processor.image_processor.do_resize = False
+        return model, processor
+
+    def get_slices(self, image, overlap, slice_size):
+        B, H, W, C = image.shape
+
+        # Calculate the number of slices needed along each dimension
+        num_slices_h = (H - overlap) // (slice_size - overlap) + 1
+        num_slices_w = (W - overlap) // (slice_size - overlap) + 1
+        # Prepare a list to store the slices
+        slices = []
+        # Generate the slices
+        for i in range(num_slices_h):
+            for j in range(num_slices_w):
+                start_h = i * (slice_size - overlap)
+                start_w = j * (slice_size - overlap)
+
+                end_h = min(start_h + slice_size, H)
+                end_w = min(start_w + slice_size, W)
+
+                start_h = max(0, end_h - slice_size)
+                start_w = max(0, end_w - slice_size)
+
+                slice_ = image[:, start_h:end_h, start_w:end_w, :]
+                print(slice_.shape)
+                slices.append(slice_)
+        return num_slices_w, slices
+
+    def get_slice_boxs(self, image, overlap, slice_size):
+        B, H, W, C = image.shape
+
+        # Calculate the number of slices needed along each dimension
+        num_slices_h = (H - overlap) // (slice_size - overlap) + 1
+        num_slices_w = (W - overlap) // (slice_size - overlap) + 1
+        # Prepare a list to store the slices
+        slices_boxs = []
+        # Generate the slices
+        for i in range(num_slices_h):
+            for j in range(num_slices_w):
+                start_h = i * (slice_size - overlap)
+                start_w = j * (slice_size - overlap)
+
+                end_h = min(start_h + slice_size, H)
+                end_w = min(start_w + slice_size, W)
+
+                start_h = max(0, end_h - slice_size)
+                start_w = max(0, end_w - slice_size)
+
+                bx = (start_h, end_h, start_w, end_w)
+                slices_boxs.append(bx)
+                print(bx)
+        return slices_boxs
+
+    def CLIPSeg_image(self, image, text, processor, model, use_cuda):
+        import torch
+        import torchvision.transforms.functional as TF
+        B, H, W, C = image.shape
+
+        import torchvision
+        with torch.no_grad():
+            image = image.permute(0, 3, 1, 2).to(torch.float32) * 255
+
+            inputs = processor(text=[text] * B, images=image, padding=True, return_tensors="pt")
+
+            # Move model and image tensors to CUDA if requested
+            if use_cuda and torch.cuda.is_available():
+                model = model.to('cuda')
+                inputs = {k: v.to('cuda') if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
+
+            result = model(**inputs)
+            t = torch.sigmoid(result[0])
+            mask = (t - t.min()) / t.max()
+            mask = torchvision.transforms.functional.resize(mask, (H, W))
+            mask = mask.unsqueeze(-1)
+            mask_img = mask.repeat(1, 1, 1, 3)
+
+            # Move mask and mask_img back to CPU if they were moved to CUDA
+            if use_cuda and torch.cuda.is_available():
+                mask = mask.cpu()
+                mask_img = mask_img.cpu()
+
+        return (mask, mask_img,)
+
+
 from typing import Tuple
 
 
 @ETK_image_base
-class PreviewImagePassThrough(PreviewImage):
+class PreviewImagePassThrough:  # (PreviewImage):
     @classmethod
     def INPUT_TYPES(s):
+        from nodes import PreviewImage
         # get the input types from the parent class
-        input_types = super().INPUT_TYPES()
+        input_types = PreviewImage.INPUT_TYPES()
 
         return input_types
 
+    OUTPUT_NODE = True
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "pass_through"
 
     def pass_through(self, **kwargs):
+        from nodes import PreviewImage
         images = kwargs.pop("images", None)
         # first call the parent class's save_image method
-        result = super().save_images(images, **kwargs)
+        result = PreviewImage().save_images(images, **kwargs)
         result["result"] = (images,)
         return result
 
 
-import torch
-
-if __name__ == "__main__":
-    # test TextRender
-    tr = TextRender()
-    result = tr.render_text('Hello, world!', 128, 128, 512, 512, "Arial", 16, "#FFFF000")[0]
-    torch_image_show(result)
-    print(result.shape)
-
-
 def main():
-    pass
+    t = CLIPSegAdv()
+    t.apply_transform(torch.rand(1, 1920, 1080, 3), "a", False, None)
 
 
 if __name__ == "__main__":

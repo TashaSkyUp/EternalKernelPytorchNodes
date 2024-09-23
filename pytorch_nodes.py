@@ -10,9 +10,9 @@ try:
     from .config import config_settings
 except ImportError as e:
     from config import config_settings
-
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+#NODE_CLASS_MAPPINGS = {}
+#NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 def ETK_pytorch_base(cls):
