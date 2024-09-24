@@ -40,8 +40,14 @@ class FileBackedDict(MutableMapping):
 
         # Convert file_path to an absolute path (if needed)
         self.file_path = os.path.abspath(file_path)
-        self._data = {}
-        self._load()
+
+        # check if the file exists, if it doesnt create it with the current data
+        if not os.path.exists(self.file_path):
+            self._data = {}
+            self._save()
+        else:
+            self._data = {}
+            self._load()
 
     def _load(self):
         """Loads the data from the file into memory."""
@@ -79,7 +85,7 @@ class FileBackedDict(MutableMapping):
             json.dump(data_to_save, file, ensure_ascii=False, indent=4)
 
     def __getitem__(self, key):
-        self._load() # Ensure the data is up-to-date
+        self._load()  # Ensure the data is up-to-date
         return self._data[key]
 
     def __setitem__(self, key, value):
