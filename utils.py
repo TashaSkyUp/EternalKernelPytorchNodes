@@ -70,6 +70,23 @@ class FileBackedDict(MutableMapping):
 
     def _save(self):
         """Saves the current data to the file."""
+        # Debug print to check if the directory and file path exist
+        print(f"Saving file to: {self.file_path}")
+        directory = os.path.dirname(self.file_path)
+
+        # Ensure the directory exists, create if it doesn't
+        if not os.path.exists(directory):
+            print(f"Directory does not exist, creating: {directory}")
+            os.makedirs(directory, exist_ok=True)
+        else:
+            print(f"Directory exists: {directory}")
+
+        # Check if the file exists
+        if not os.path.exists(self.file_path):
+            print(f"File does not exist, it will be created: {self.file_path}")
+        else:
+            print(f"File already exists: {self.file_path}")
+
         # Save only the top-level keys that are not FileBackedDicts
         data_to_save = {}
         for key, value in self._data.items():
@@ -80,9 +97,11 @@ class FileBackedDict(MutableMapping):
             else:
                 data_to_save[key] = value
 
-        # Save the metadata about the keys
+        # Save the metadata about the keys, creating the file if it does not exist using utf-8 encoding
         with open(self.file_path, 'w', encoding='utf-8') as file:
+            print(f"Writing data to file: {self.file_path}")
             json.dump(data_to_save, file, ensure_ascii=False, indent=4)
+            print("File written successfully.")
 
     def __getitem__(self, key):
         self._load()  # Ensure the data is up-to-date
