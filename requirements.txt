@@ -61,3 +61,5 @@ TTS
 pytesseract
 scikit-image
 h5py
+
+opencv-python
