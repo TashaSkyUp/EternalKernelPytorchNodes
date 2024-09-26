@@ -28,12 +28,6 @@ class GitIO:
 
         real_git_path = os.path.join(self.gde_path, "data", "gitio", git_name)
 
-        # users_gitio_path = os.path.abspath(os.path.join(
-        #     GDE_PATH,
-        #     config_settings["gitio"]["base"],
-        #     users_gitio)
-        # )
-
         # check to see if it exists and is a git repo, if not then clone it
         if os.path.exists(real_git_path):
             # check to see if it is a git repo
