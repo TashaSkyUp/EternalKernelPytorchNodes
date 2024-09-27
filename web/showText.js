@@ -1,6 +1,6 @@
 import {app} from "/scripts/app.js";
 import {ComfyWidgets} from "/scripts/widgets.js";
-import {createAddNodeWidget} from "./AddNodeWidget.js";
+//import {createAddNodeWidget} from "./AddNodeWidget.js";
 
 app.registerExtension({
     name: "etk.ShowText",
