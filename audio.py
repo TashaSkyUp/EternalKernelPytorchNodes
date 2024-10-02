@@ -439,6 +439,9 @@ class XttsNode:
             "--lang", kwargs.get('lang', 'en'),
             "--speaker", kwargs.get('speaker_wav', ''),
         ]
+        # write the command to "temp_command.txt" in the same folder as this file is in
+        with open(os.path.join(this_file_path, "temp_command.txt"), "w") as f:
+            f.write(" ".join(command))
 
         # execute the command in its own full porcess and recieve the output
         try:
