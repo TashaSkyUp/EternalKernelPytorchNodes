@@ -77,30 +77,50 @@ def generate_xtts(**kwargs):
 #     something = manager.
 
 
+import os
+import argparse
+import logging
+import traceback
+
 def main():
-    import os
-    parser = argparse.ArgumentParser(description='Generate  from given text.')
-    parser.add_argument('--text', help='Text to generate  for')
-    parser.add_argument('--folder', type=str, default='.', help='output folder')
-    parser.add_argument('--lang', type=str, default='en')
-    parser.add_argument('--speaker', type=str, default='', help='Speaker wav use for generation')
-    parser.add_argument('--file', type=str, default="", help='newline seperated file.')
+    # Set up logging to a file
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xttscli.log')
+    logging.basicConfig(filename=log_file, level=logging.ERROR,
+                        format='%(asctime)s %(levelname)s %(message)s')
 
-    args = parser.parse_args()
-    kwargs = vars(args)
+    try:
+        parser = argparse.ArgumentParser(description='Generate from given text.')
+        parser.add_argument('--text', help='Text to generate for')
+        parser.add_argument('--folder', type=str, default='.', help='Output folder')
+        parser.add_argument('--lang', type=str, default='en')
+        parser.add_argument('--speaker', type=str, default='', help='Speaker wav to use for generation')
+        parser.add_argument('--file', type=str, default="", help='Newline separated file.')
 
-    # test if file is set if it is open it
-    if kwargs['file'] is not None:
-        with open(kwargs['file']) as f:
-            kwargs['text'] = f.read().split('\n')
+        args = parser.parse_args()
+        kwargs = vars(args)
 
-    # make sure the speaker file exists
-    if kwargs['speaker'] is not None:
-        if not os.path.exists(kwargs['speaker']):
-            raise ValueError(f"Speaker file {kwargs['speaker']} does not exist.")
+        # If file is set, open it and read the content
+        if kwargs['file']:
+            with open(kwargs['file']) as f:
+                kwargs['text'] = f.read().split('\n')
 
-    generated_files = generate_xtts(**kwargs)
-    print(f"Generated files: {generated_files}")
+        # Ensure the speaker file exists
+        if kwargs['speaker']:
+            if not os.path.exists(kwargs['speaker']):
+                raise ValueError(f"Speaker file {kwargs['speaker']} does not exist.")
+
+        # Call your generate function
+        generated_files = generate_xtts(**kwargs)
+        print(f"Generated files: {generated_files}")
+
+    except Exception as e:
+        # Log the full exception details including the stack trace
+        logging.error("An error occurred: %s", traceback.format_exc())
+        print(f"An error occurred. Check the log file at {log_file} for details.")
+
+if __name__ == '__main__':
+    main()
+
 
 
 if __name__ == "__main__":
