@@ -6,9 +6,11 @@ import joblib
 from .config import config_settings
 
 temp_dir = config_settings["tmp_dir"]
-from  . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-#NODE_CLASS_MAPPINGS = {}
-#NODE_DISPLAY_NAME_MAPPINGS = {}
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+
+# NODE_CLASS_MAPPINGS = {}
+# NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 # Create a memory object for caching
@@ -441,22 +443,24 @@ class XttsNode:
         # execute the command in its own full porcess and recieve the output
         output = subprocess.check_output(command, shell=True)
         generated = output.decode("utf-8")
-        generated_files = generated.split("Generated files: (")[1].split(")")[0]
-        generated_files = eval(generated_files)
-        generated_files = generated_files[1]
-        # get the output folder
-        output_folder = os.path.dirname(kwargs.get('file', "output.wav"))
+        if "Generated files: (" in generated:
+            generated_files = generated.split("Generated files: (")[1].split(")")[0]
+            generated_files = eval(generated_files)
+            generated_files = generated_files[1]
+            # get the output folder
+            output_folder = os.path.dirname(kwargs.get('file', "output.wav"))
 
-        # move the files to the correct files
-        out_files = []
-        for src_file in generated_files:
-            target_file = audio_folder_def.get_next_file_name()
-            shutil.copy(src_file, target_file)
-            try:
-                out_files.append(target_file)
-            except FileNotFoundError as e:
-                raise e
-
+            # move the files to the correct files
+            out_files = []
+            for src_file in generated_files:
+                target_file = audio_folder_def.get_next_file_name()
+                shutil.copy(src_file, target_file)
+                try:
+                    out_files.append(target_file)
+                except FileNotFoundError as e:
+                    raise e
+        else:
+            raise Exception(f"Error with xttscli, output was: {generated}")
 
         return (out_files[0], out_files, output_folder, audio_folder_def,)
 
