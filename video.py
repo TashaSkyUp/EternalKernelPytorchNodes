@@ -1333,7 +1333,11 @@ class CombineFoldersWithFramesToVideoFiles(metaclass=ABCWidgetMetaclass):
                 create_video_from_images(folder_path, output_file, fps, codec, q, pix_fmt)
                 combined_video_paths.append(output_file)
             except Exception as e:
-                messages.append(f"Error processing folder {folder_path}: {str(e)}")
+                import traceback
+
+                # Capture full traceback information
+                full_traceback = traceback.format_exc()
+                messages.append(f"Error processing folder '{folder_path}': {str(e)}\nFull Traceback:\n{full_traceback}")
 
         return (combined_video_paths, "\n".join(messages),)
 
@@ -1353,18 +1357,38 @@ import subprocess
 
 
 def create_video_from_images(folder_path, output_file, fps, codec, q, pix_fmt):
-    list_file_path = create_file_list(folder_path)
-    ffmpeg_exe = 'ffmpeg'  # Ensure ffmpeg is in your PATH or provide the full path to the ffmpeg executable
+    import os
+    import subprocess
+    import shutil
+    import traceback
 
+    # Assuming create_file_list is part of the larger framework, not redefining it.
+    list_file_path = create_file_list(folder_path)
+
+    # Ensure ffmpeg is available in PATH
+    ffmpeg_exe = shutil.which('ffmpeg')
+    if ffmpeg_exe is None:
+        raise RuntimeError("FFmpeg is not found. Please ensure it is installed and available in the system's PATH.")
+
+    # Normalize paths for cross-platform compatibility
+    list_file_path = os.path.normpath(list_file_path)
+    output_file = os.path.normpath(output_file)
+
+    # FFmpeg command to create the video
     command = [
         ffmpeg_exe, '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
-        '-vf', f"fps={fps}", '-c:v', codec, '-pix_fmt', pix_fmt, "-qp", str(q), output_file
+        '-vf', f"fps={fps}", '-c:v', codec, '-pix_fmt', pix_fmt, '-qp', str(q), output_file
     ]
 
     try:
-        subprocess.run(command, check=True)
+        # Capture both stdout and stderr to diagnose errors
+        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"ffmpeg failed with error: {e.stderr.decode()}")
+        # Capture the full traceback and the error output from the ffmpeg process
+        error_message = e.stderr.decode() if e.stderr else "No additional error information"
+        full_traceback = traceback.format_exc()
+        raise RuntimeError(f"ffmpeg failed with error: {error_message}\nFull Traceback:\n{full_traceback}")
+
 
 
 class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
