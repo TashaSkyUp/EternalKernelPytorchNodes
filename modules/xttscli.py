@@ -47,7 +47,7 @@ def generate_xtts(**kwargs):
     with ProcessPoolExecutor(max_workers=batch_size) as executor:
         futures = []
         for i, text in enumerate(texts):
-            if len(text)>1:
+            if len(text) > 1:
                 ii = str(i).zfill(1 + len(str(1 + len(texts))))
                 file_to_use = f"{folder}/tts_{ii}_{str(uuid.uuid4())}.wav"
                 future = executor.submit(generate_xtts_for_text, text, file_to_use, lang, speaker)
@@ -76,17 +76,34 @@ def generate_xtts(**kwargs):
 #     # also we want to SHARE the TTS model
 #     something = manager.
 
+def cache_parameters(cache_file, params):
+    """Cache the input parameters to a JSON file."""
+    with open(cache_file, 'w') as f:
+        json.dump(params, f)
 
-import os
-import argparse
-import logging
-import traceback
+
+def load_cached_parameters(cache_file):
+    """Load the cached parameters from the JSON file."""
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    return None
+
 
 def main():
+    import sys
+    import os
+    import argparse
+    import logging
+    import traceback
+
     # Set up logging to a file
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xttscli.log')
     logging.basicConfig(filename=log_file, level=logging.ERROR,
                         format='%(asctime)s %(levelname)s %(message)s')
+
+    # Define the cache file path
+    cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'params_cache.json')
 
     try:
         parser = argparse.ArgumentParser(description='Generate from given text.')
@@ -95,9 +112,23 @@ def main():
         parser.add_argument('--lang', type=str, default='en')
         parser.add_argument('--speaker', type=str, default='', help='Speaker wav to use for generation')
         parser.add_argument('--file', type=str, default="", help='Newline separated file.')
+        parser.add_argument('--rerun', action='store_true', help='Rerun with the last cached parameters.')
 
         args = parser.parse_args()
         kwargs = vars(args)
+
+        # Handle --rerun logic
+        if args.rerun:
+            cached_params = load_cached_parameters(cache_file)
+            if cached_params:
+                print(f"Rerunning with cached parameters: {cached_params}")
+                kwargs.update(cached_params)
+            else:
+                print("No cached parameters found. Exiting.")
+                sys.exit(1)
+        else:
+            # Cache the parameters if not rerun
+            cache_parameters(cache_file, kwargs)
 
         # If file is set, open it and read the content
         if kwargs['file']:
@@ -118,10 +149,6 @@ def main():
         logging.error("An error occurred: %s", traceback.format_exc())
         print(f"An error occurred. Check the log file at {log_file} for details.")
 
+
 if __name__ == '__main__':
-    main()
-
-
-
-if __name__ == "__main__":
     main()
