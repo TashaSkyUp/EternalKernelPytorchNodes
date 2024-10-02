@@ -441,26 +441,34 @@ class XttsNode:
         ]
 
         # execute the command in its own full porcess and recieve the output
-        output = subprocess.check_output(command, shell=True)
-        generated = output.decode("utf-8")
-        if "Generated files: (" in generated:
-            generated_files = generated.split("Generated files: (")[1].split(")")[0]
-            generated_files = eval(generated_files)
-            generated_files = generated_files[1]
-            # get the output folder
-            output_folder = os.path.dirname(kwargs.get('file', "output.wav"))
+        try:
+            # Capture both stdout and stderr
+            output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+            generated = output.decode("utf-8")
 
-            # move the files to the correct files
-            out_files = []
-            for src_file in generated_files:
-                target_file = audio_folder_def.get_next_file_name()
-                shutil.copy(src_file, target_file)
-                try:
+            if "Generated files: (" in generated:
+                # Extract generated files
+                generated_files = generated.split("Generated files: (")[1].split(")")[0]
+                generated_files = eval(generated_files)  # This will parse the string to a tuple/list
+                generated_files = generated_files[1]
+
+                # Get the output folder
+                output_folder = os.path.dirname(kwargs.get('file', "output.wav"))
+
+                # Move the files to the correct location
+                out_files = []
+                for src_file in generated_files:
+                    target_file = audio_folder_def.get_next_file_name()
+                    shutil.copy(src_file, target_file)
                     out_files.append(target_file)
-                except FileNotFoundError as e:
-                    raise e
-        else:
-            raise Exception(f"Error with xttscli, output was: {generated}")
+
+            else:
+                raise Exception(f"Error with xttscli, output was: {generated}")
+
+        except subprocess.CalledProcessError as e:
+            # Output the captured stdout + stderr
+            print(f"Command failed with error: {e.output.decode('utf-8')}")
+            raise e
 
         return (out_files[0], out_files, output_folder, audio_folder_def,)
 
