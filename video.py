@@ -1390,7 +1390,6 @@ def create_video_from_images(folder_path, output_file, fps, codec, q, pix_fmt):
         raise RuntimeError(f"ffmpeg failed with error: {error_message}\nFull Traceback:\n{full_traceback}")
 
 
-
 class ImageStackToVideoFile(metaclass=ABCWidgetMetaclass):
     """Really just saves the image stack to a video file"""
 
@@ -2336,7 +2335,7 @@ class AudioDefinitionProvider(metaclass=ABCWidgetMetaclass):
     def get_all_audio_files(self, audio_folder):
         import os
         audio_files = os.listdir(audio_folder)
-        audio_files = [os.path.join(audio_folder, x) for x in audio_files if "audio_" in x]
+        audio_files = sorted([os.path.join(audio_folder, x) for x in audio_files if "audio_" in x])
         return audio_files
 
     def audio_definition_provider(self, **kwargs):
