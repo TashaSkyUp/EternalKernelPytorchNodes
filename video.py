@@ -31,7 +31,6 @@ import numpy as np
 import cv2
 import subprocess
 import imageio_ffmpeg as ffmpeg
-# from comfy_extras.nodes_video_model import SVD_img2vid_Conditioning
 
 from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
@@ -3097,6 +3096,8 @@ class ListedSVDConditioning(metaclass=ABCWidgetMetaclass):
     FUNCTION = "listed_SVD_conditioning"
 
     def listed_SVD_conditioning(self, **kwargs):
+        from comfy_extras.nodes_video_model import SVD_img2vid_Conditioning
+
         # just like Listed_HoldFramesForSecsInVideoFolder, we will call SVD_img2vid_Conditioning for each set of params
 
         positives = []
