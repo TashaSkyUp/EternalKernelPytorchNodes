@@ -1944,8 +1944,10 @@ class ListVAEDecode:
             if len(results_to_use.shape) == 3:
                 results_to_use = results_to_use.unsqueeze(0)
 
+            print("FT:", final_tensor[i, :, :, :].shape)
+            print("RTU:", results_to_use.shape)
+
             final_tensor[i, :, :, :] = results_to_use
-            print(final_tensor[i, :, :, :].shape)
 
         return (results, final_tensor,)
 
