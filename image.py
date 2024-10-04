@@ -1940,7 +1940,12 @@ class ListVAEDecode:
         # also need to specify to make the final tensor on the CPU
         final_tensor = torch.zeros((num_images, width, height, channels), device="cpu")
         for i in range(num_images):
-            final_tensor[i, :, :, :] = results[i]
+            results_to_use = results[i]
+            if len(results_to_use.shape) == 3:
+                results_to_use = results_to_use.unsqueeze(0)
+
+            final_tensor[i, :, :, :] = results_to_use
+            print(final_tensor[i, :, :, :].shape)
 
         return (results, final_tensor,)
 
