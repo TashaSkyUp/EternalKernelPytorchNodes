@@ -1938,16 +1938,43 @@ class ListVAEDecode:
         num_images = len(results)
 
         # also need to specify to make the final tensor on the CPU
-        final_tensor = torch.zeros((num_images, width, height, channels), device="cpu")
+
+        final_bsize = 0
+        # find the bsize
+        # sometimes a result will actually be shape (>1, W, H, C)
+        # sometimes it will be  (W, H, C)
+        # sometimes it will be (1, W, H, C)
+
         for i in range(num_images):
-            results_to_use = results[i]
-            if len(results_to_use.shape) == 3:
-                results_to_use = results_to_use.unsqueeze(0)
+            if len(results[i].shape) == 3:
+                results[i] = results[i].unsqueeze(0)
+                final_bsize += 1
+            elif len(results[i].shape) == 4:
+                if results[i].shape[0] == 1:
+                    results[i] = results[i]
+                    final_bsize += 1
+                else:
+                    final_bsize += results[i].shape[0]
 
-            print("FT:", final_tensor[i, :, :, :].shape)
-            print("RTU:", results_to_use.shape)
+        # assign
+        final_tensor = torch.zeros((final_bsize, width, height, channels), device="cpu")
+        cur_idx = 0
 
-            final_tensor[i, :, :, :] = results_to_use
+        while True:
+
+            if len(results[i].shape) == 4:
+                if results[i].shape[0] == 1:
+                    final_tensor[cur_idx] = results[i]
+                    cur_idx += 1
+                else:
+                    for j in range(results[i].shape[0]):
+                        res = results[i][j]
+                        if len(res.shape) == 3:
+                            res = res.unsqueeze(0)
+                        final_tensor[cur_idx] = res
+                        cur_idx += 1
+            if cur_idx >= final_bsize:
+                break
 
         return (results, final_tensor,)
 
