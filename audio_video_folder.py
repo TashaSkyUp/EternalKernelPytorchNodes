@@ -1,5 +1,5 @@
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+from . import NODE_CLASS_MAPPINGS
+from . import NODE_DISPLAY_NAME_MAPPINGS
 
 
 def ETK_AVF_base(cls):
