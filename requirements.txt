@@ -10,6 +10,8 @@ moviepy
 openai-whisper
 addict
 diffusers
+ffmpeg-python
+imageio-ffmpeg
 
 # core deps for xtts
 numpy==1.22.0;python_version<="3.10"
