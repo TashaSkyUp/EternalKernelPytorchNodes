@@ -337,8 +337,8 @@ class LoadAudioFromServer():
     def load_audio_from_server(self, **kwargs):
         file_on_server = kwargs["server_path"]
         from comfy_extras.nodes_audio import LoadAudio
-        f = LoadAudio().load[0]
-        r = f(file_on_server)
+        f = LoadAudio().load
+        r = f(file_on_server)[0]
 
         return (r,)
 
