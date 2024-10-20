@@ -128,7 +128,7 @@ def main():
     parser.add_argument('--text', help="Text to synthesize.")
     parser.add_argument('--file', help="File containing text to synthesize (one text per line).")
     parser.add_argument('--lang', default='en', help="Language for the TTS.")
-    parser.add_argument('--output', help="Path to save the output TTS file.")
+    parser.add_argument('--folder', help="Path to save the output TTS file.")
     parser.add_argument('--device', default='cuda:0', help="Device to run the model on. Default: cuda:0")
     parser.add_argument('--test', action='store_true', help="Run a test TTS using the test.speech file.")
 
@@ -145,9 +145,9 @@ def main():
                 raise FileNotFoundError(f"The test file '{default_test_file_path}' does not exist. Please create it.")
 
             args.file = default_test_file_path
-            args.output = os.path.join(script_dir, 'test_output.wav')
+            args.folder = os.path.join(script_dir, 'test_output.wav')
             print(f"Test file: {args.file}")
-            print(f"Output will be saved to: {args.output}")
+            print(f"Output will be saved to: {args.folder}")
 
         # Handle the --file argument
         if args.file:
@@ -172,7 +172,7 @@ def main():
                     device=args.device
                 )
 
-                output_file = f"{args.output}_{i}.wav" if args.output else f'./output_{i}.wav'
+                output_file = f"{args.folder}_{i}.wav" if args.folder else f'./output_{i}.wav'
                 try:
                     os.rename(output_path, output_file)
                 except Exception as e:
@@ -192,7 +192,7 @@ def main():
                 device=args.device
             )
 
-            output_file = args.output if args.output else './output.wav'
+            output_file = args.folder if args.folder else './output.wav'
             try:
                 os.rename(output_path, output_file)
             except Exception as e:

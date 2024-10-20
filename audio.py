@@ -438,6 +438,7 @@ class XttsNode:
             "--folder", kwargs.get('output_path', "."),
             "--lang", kwargs.get('lang', 'en'),
             "--speaker", kwargs.get('speaker_wav', ''),
+            "--device", kwargs.get('device', 'cuda:0'),
         ]
         # write the command to "temp_command.txt" in the same folder as this file is in
         with open(os.path.join(this_file_path, "temp_command.txt"), "w") as f:
@@ -446,7 +447,8 @@ class XttsNode:
         # execute the command in its own full porcess and recieve the output
         try:
             # Capture both stdout and stderr
-            output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+            #output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+            output = subprocess.check_output(command, stderr=subprocess.STDOUT)
             generated = output.decode("utf-8")
 
             if "Generated files: (" in generated:
