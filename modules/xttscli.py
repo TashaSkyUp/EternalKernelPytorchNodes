@@ -1,7 +1,8 @@
 import argparse
 import torch.multiprocessing as mp
-
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import unittest
+from unittest.mock import patch, MagicMock
 
 
 def generate_xtts_for_text(text, file, lang, speaker):
@@ -13,7 +14,6 @@ def generate_xtts_for_text(text, file, lang, speaker):
         speaker_wav=speaker,
         language=lang,
         file_path=file,
-        # emotion="angry", # doesnt do anything as far as i can tell with xtts2
     )
 
 
@@ -28,7 +28,6 @@ def generate_xtts(**kwargs):
 
     text = kwargs.get('text')
     folder = kwargs.get('folder', '.')
-    # make the folder absolute
     folder = os.path.abspath(folder)
     lang = kwargs.get('lang', 'en')
     speaker = kwargs.get('speaker', '')
@@ -62,32 +61,101 @@ def generate_xtts(**kwargs):
     return (o_files[0], o_files,)
 
 
-# def generate_xtts_for_text_advanced(text, file, lang, speaker):
-#     from TTS.api import TTS
-#     import torch
-#
-#     # Create a SharedMemoryManager
-#     manager = mp.Manager()
-#     # Create a shared list to store the result
-#     result = manager.list()
-#     model = manager.model()
-#
-#
-#     # also we want to SHARE the TTS model
-#     something = manager.
-
 def cache_parameters(cache_file, params):
     """Cache the input parameters to a JSON file."""
+    import json
     with open(cache_file, 'w') as f:
         json.dump(params, f)
 
 
 def load_cached_parameters(cache_file):
     """Load the cached parameters from the JSON file."""
+    import json
+    import os
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
             return json.load(f)
     return None
+
+
+def run_test():
+    """Run unit tests for the module."""
+    unittest.main(argv=[''], exit=False)
+
+
+class TestGenerateXTTS(unittest.TestCase):
+    """Unit tests for generate_xtts functions."""
+
+    @patch('os.path.exists', return_value=True)
+    @patch('TTS.api.TTS.tts_to_file')
+    def test_generate_xtts_single_text(self, mock_tts_to_file, mock_exists):
+        """Test generating xtts with a single text input."""
+        mock_tts_to_file.return_value = None
+        kwargs = {
+            'text': 'Hello, this is a test.',
+            'folder': './output',
+            'lang': 'en',
+            'speaker': '/path/to/speaker.wav'
+        }
+
+        result = generate_xtts(**kwargs)
+
+        # Assertions
+        self.assertEqual(len(result[1]), 1)
+        mock_tts_to_file.assert_called_once()
+
+    @patch('os.path.exists', return_value=True)
+    @patch('TTS.api.TTS.tts_to_file')
+    def test_generate_xtts_multiple_texts(self, mock_tts_to_file, mock_exists):
+        """Test generating xtts with multiple texts."""
+        mock_tts_to_file.return_value = None
+        kwargs = {
+            'text': ['Hello, this is a test.', 'This is another test.'],
+            'folder': './output',
+            'lang': 'en',
+            'speaker': '/path/to/speaker.wav'
+        }
+
+        result = generate_xtts(**kwargs)
+
+        # Assertions
+        self.assertEqual(len(result[1]), 2)
+        self.assertEqual(mock_tts_to_file.call_count, 2)
+
+    def test_cache_parameters(self):
+        """Test caching parameters to a file."""
+        import os
+        import json
+        test_cache_file = './test_cache.json'
+        test_params = {'text': 'sample text', 'lang': 'en'}
+
+        cache_parameters(test_cache_file, test_params)
+
+        # Verify file content
+        with open(test_cache_file, 'r') as f:
+            data = json.load(f)
+            self.assertEqual(data, test_params)
+
+        # Clean up
+        os.remove(test_cache_file)
+
+    def test_load_cached_parameters(self):
+        """Test loading cached parameters from a file."""
+        import os
+        import json
+        test_cache_file = './test_cache.json'
+        test_params = {'text': 'sample text', 'lang': 'en'}
+
+        # Write test data to the file
+        with open(test_cache_file, 'w') as f:
+            json.dump(test_params, f)
+
+        # Load the parameters
+        loaded_params = load_cached_parameters(test_cache_file)
+        self.assertEqual(loaded_params, test_params)
+
+        # Clean up
+        os.remove(test_cache_file)
 
 
 def main():
@@ -97,12 +165,10 @@ def main():
     import logging
     import traceback
 
-    # Set up logging to a file
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xttscli.log')
     logging.basicConfig(filename=log_file, level=logging.ERROR,
                         format='%(asctime)s %(levelname)s %(message)s')
 
-    # Define the cache file path
     cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'params_cache.json')
 
     try:
@@ -113,11 +179,15 @@ def main():
         parser.add_argument('--speaker', type=str, default='', help='Speaker wav to use for generation')
         parser.add_argument('--file', type=str, default="", help='Newline separated file.')
         parser.add_argument('--rerun', action='store_true', help='Rerun with the last cached parameters.')
+        parser.add_argument('--test', action='store_true', help='Run the test.')
 
         args = parser.parse_args()
         kwargs = vars(args)
 
-        # Handle --rerun logic
+        if args.test:
+            run_test()
+            sys.exit(0)
+
         if args.rerun:
             cached_params = load_cached_parameters(cache_file)
             if cached_params:
@@ -127,25 +197,20 @@ def main():
                 print("No cached parameters found. Exiting.")
                 sys.exit(1)
         else:
-            # Cache the parameters if not rerun
             cache_parameters(cache_file, kwargs)
 
-        # If file is set, open it and read the content
         if kwargs['file']:
             with open(kwargs['file']) as f:
                 kwargs['text'] = f.read().split('\n')
 
-        # Ensure the speaker file exists
         if kwargs['speaker']:
             if not os.path.exists(kwargs['speaker']):
                 raise ValueError(f"Speaker file {kwargs['speaker']} does not exist.")
 
-        # Call your generate function
         generated_files = generate_xtts(**kwargs)
         print(f"Generated files: {generated_files}")
 
     except Exception as e:
-        # Log the full exception details including the stack trace
         logging.error("An error occurred: %s", traceback.format_exc())
         print(f"An error occurred. Check the log file at {log_file} for details.")
 
