@@ -453,9 +453,11 @@ class XttsNode:
 
             if "Generated files: (" in generated:
                 # Extract generated files
-                generated_files = generated.split("Generated files: (")[1].split(")")[0]
-                generated_files = eval(generated_files)  # This will parse the string to a tuple/list
-                generated_files = generated_files[1]
+                generated = str(generated)
+                generated = generated.split(r"Generated files: (")[1]
+                generated_files = generated.split(")")[0]
+                generated_files = eval(generated_files)
+
 
                 # Get the output folder
                 output_folder = os.path.dirname(kwargs.get('file', "output.wav"))

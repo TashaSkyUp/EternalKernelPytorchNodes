@@ -258,6 +258,49 @@ class AudioFolderProvider():
 
         return ret
 
+    RETURN_TYPES = ("AUDIOFOLDER",)
+    FUNCTION = "audio_folder_provider"
+
+    def audio_folder_provider(self, **kwargs):
+        import shutil
+        import os
+
+        # check if the folder_path is none
+        if kwargs["folder_path"] is None:
+            raise ValueError("folder_path must be specified")
+
+        # set folder exists flag by using the os.path.exists function
+        folder_exists = os.path.exists(kwargs["folder_path"])
+
+        if not folder_exists:
+            os.makedirs(kwargs["folder_path"])
+            folder_exists = True
+
+        # set files in folder flag by using the os.listdir function
+        files_in_folder = os.listdir(kwargs["folder_path"])
+
+        # set accessible flag by using the os.access function
+        accessible = os.access(kwargs["folder_path"], os.W_OK)
+        if not accessible:
+            raise ValueError("Folder for audio files is not accessible")
+
+        if kwargs["clear_folder"]:
+            # if the folder exists, delete all files in the folder
+            if folder_exists:
+                for file in files_in_folder:
+                    # use shutil to remove the file
+                    fl = os.path.join(kwargs["folder_path"], file)
+                    if os.path.isfile(fl):
+                        os.remove(fl)
+                    # use shutil to remove the entire path
+                    check_this_path = file
+                    if len(check_this_path) > 3:
+                        shutil.rmtree(check_this_path, ignore_errors=True)
+                    else:
+                        raise ValueError("Folder path is too short")
+
+        return (kwargs["folder_path"],)
+
 
 @ETK_AVF_base
 class AudioDefinitionProvider():
