@@ -12,7 +12,6 @@ from TTS.tts.models.xtts import Xtts
 
 XTTS_MODEL = None
 
-
 def prepare_speaker_audio(speaker):
     """
     Prepares the speaker audio file and returns the speaker file path.
@@ -161,6 +160,9 @@ def main():
         # Load the XTTS model
         load_model(args.checkpoint, args.config, args.vocab, args.device)
 
+        # Prepare to store generated files
+        all_output_files = []
+
         # Process multiple lines of text (if from file)
         if isinstance(args.text, list):
             for i, tts_text in enumerate(args.text):
@@ -181,7 +183,8 @@ def main():
                     shutil.copy(output_path, output_file)
                     os.remove(output_path)
 
-                print(f"TTS generation complete for line {i + 1}. Output saved to {output_file}")
+                all_output_files.append(output_file)
+
         else:
             # Generate TTS for a single text input
             output_path = run_tts(
@@ -201,7 +204,11 @@ def main():
                 shutil.copy(output_path, output_file)
                 os.remove(output_path)
 
-            print(f"TTS generation complete. Output saved to {output_file}")
+            all_output_files.append(output_file)
+
+        # Final output format to match expected behavior
+        main_output_file = all_output_files[0]
+        print(f"Generated files: ({main_output_file}, {all_output_files})")
 
     except Exception as e:
         logging.error("An error occurred: %s", traceback.format_exc())
@@ -209,6 +216,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # For testing
-    sys.argv = [sys.argv[0], '--test']
     main()
