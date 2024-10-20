@@ -208,7 +208,7 @@ def main():
 
         # Final output format to match expected behavior
         main_output_file = all_output_files[0]
-        print(f"Generated files: ({main_output_file}, {all_output_files})")
+        print(f"Generated files: ({all_output_files})")
 
     except Exception as e:
         logging.error("An error occurred: %s", traceback.format_exc())
