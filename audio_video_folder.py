@@ -303,6 +303,47 @@ class AudioFolderProvider():
 
 
 @ETK_AVF_base
+class DictToComfyAudio:
+    """
+    given a dictionary, creates a comfy audio node
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        ret = {"required": {"dict": ("DICT", {"default": {}})}}
+        return ret
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "dict_to_comfy_audio"
+
+    def dict_to_comfy_audio(self, **kwargs):
+        return (kwargs["dict"],)
+
+
+@ETK_AVF_base
+class LoadAudioFromServer():
+    """
+    given a path on the server loads the audio file from the server and returns it as an AUDIO node
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        ret = {"required": {"server_path": ("STRING", {"default": ""})}}
+        return ret
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "load_audio_from_server"
+
+    def load_audio_from_server(self, **kwargs):
+        file_on_server = kwargs["server_path"]
+        from comfy_extras.nodes_audio import LoadAudio
+        f = LoadAudio().load
+        r = f(file_on_server)
+
+        return (r,)
+
+
+@ETK_AVF_base
 class AudioDefinitionProvider():
     """
     given a AUDIOFOLDER node, and inputs for sample rate, and channels, creates a AUDIOFOLDERDEF variable
