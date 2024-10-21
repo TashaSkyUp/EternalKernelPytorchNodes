@@ -408,9 +408,18 @@ class XttsNode:
         import subprocess
         import sys
         import shutil
+        import tempfile
+        import uuid
         from .config import this_file_path
 
+        # Handle audio_folder_def
         audio_folder_def = kwargs.get("AUDIO_FOLDER_DEF", None)
+
+        # Get user-specified output path
+        base_output_path = kwargs.get('output_path', '.')
+
+        # Generate a random temporary folder using tempfile.mkdtemp (persistent until explicitly removed)
+        temp_folder = tempfile.mkdtemp(dir=base_output_path)
 
         python_exe = sys.executable
 
@@ -423,10 +432,8 @@ class XttsNode:
         else:
             texts = [kwargs.get('text', "")]
 
-        # create a temporary file in the given folder with the speech seperated by new lines
-        fp = kwargs.get('output_path') or audio_folder_def["audio_folder"]
-        fpn = os.path.join(fp, "temp.txt")
-        fpn = os.path.abspath(fpn)
+        # Create a temporary file in the given folder with the speech separated by new lines
+        fpn = os.path.join(temp_folder, "temp.txt")
         with open(fpn, "w") as f:
             for text in texts:
                 f.write(text + "\n")
@@ -435,19 +442,19 @@ class XttsNode:
         command = [
             python_exe, xttscli_path,
             "--file", fpn,
-            "--folder", kwargs.get('output_path', "."),
+            "--folder", temp_folder,
             "--lang", kwargs.get('lang', 'en'),
             "--speaker", kwargs.get('speaker_wav', ''),
             "--device", kwargs.get('device', 'cuda:0'),
         ]
-        # write the command to "temp_command.txt" in the same folder as this file is in
+
+        # Write the command to "temp_command.txt" in the same folder as this file is in
         with open(os.path.join(this_file_path, "temp_command.txt"), "w") as f:
             f.write(" ".join(command))
 
-        # execute the command in its own full porcess and recieve the output
+        # Execute the command in its own full process and receive the output
         try:
             # Capture both stdout and stderr
-            #output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
             output = subprocess.check_output(command, stderr=subprocess.STDOUT)
             generated = output.decode("utf-8")
 
@@ -464,8 +471,11 @@ class XttsNode:
 
                 # Move the files to the correct location
                 out_files = []
-                for src_file in generated_files:
-                    target_file = audio_folder_def.get_next_file_name()
+                for i, src_file in enumerate(generated_files):
+                    if audio_folder_def:
+                        target_file = audio_folder_def.get_next_file_name()
+                    else:
+                        target_file = os.path.join(temp_folder, f"output_{i}.wav")
                     shutil.copy(src_file, target_file)
                     out_files.append(target_file)
 
@@ -477,7 +487,13 @@ class XttsNode:
             print(f"Command failed with error: {e.output.decode('utf-8')}")
             raise e
 
-        return (out_files[0], out_files, output_folder, audio_folder_def,)
+        # Return values in a consistent manner
+        return (
+            out_files[0],
+            out_files,
+            temp_folder,
+            audio_folder_def if audio_folder_def else None
+        )
 
 
 import moviepy.editor as mpy
