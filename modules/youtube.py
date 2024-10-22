@@ -12,6 +12,8 @@ from oauth2client.file import Storage
 from oauth2client.tools import argparser, run_flow
 from googleapiclient.http import MediaFileUpload
 
+from custom_nodes.EternalKernelLiteGraphNodes.config import this_file_path
+
 # Explicitly tell the underlying HTTP transport library not to retry, since
 # we are handling retry logic ourselves.
 httplib2.RETRIES = 1
@@ -36,8 +38,13 @@ except ModuleNotFoundError:
 
 comfy_dir = comfy.__path__._path[0]
 base_dir = os.path.dirname(comfy_dir)
+
+# this_dir
+this_file_path = os.path.dirname(os.path.abspath(__file__))
+
 CLIENT_SECRETS_FILE = os.path.join(base_dir, "google-credentials.json")
-CLIENT_SECRETS_FILE = r"Q:\GDE\custom_nodes\EternalKernelLiteGraphNodes\modules\youtube.py-oauth2-secrets.json"
+CLIENT_SECRETS_FILE = os.path.join(this_file_path, "youtube.py-oauth2-secrets.json")
+
 # This OAuth 2.0 access scope allows an application to upload files to the
 # authenticated user's YouTube channel, but doesn't allow other types of access.
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
