@@ -1166,8 +1166,10 @@ class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
         try:
             output = subprocess.check_output(command, stderr=subprocess.STDOUT)
             return float(output.strip())
-        except subprocess.CalledProcessError:
-            return None
+        except subprocess.CalledProcessError as e:
+            print (f"Could not determine duration of file: {file}")
+            print (f"Command: {command}")
+            raise e
 
     def handler(self, **kwargs):
         import subprocess
@@ -1212,6 +1214,7 @@ class CombineAudioAndVideoFiles(metaclass=ABCWidgetMetaclass):
                     output_args = ['-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-c:a', 'aac', '-strict',
                                    'experimental', '-y', video_out_file_fp]
                 else:
+                    print(f"audio duration: {audio_duration}, video duration: {video_duration}")
                     raise RuntimeError("Could not determine duration of video or audio file.")
             elif resample == "None":
                 output_args.extend(['-r', str(fps)])
