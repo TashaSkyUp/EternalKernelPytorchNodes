@@ -467,6 +467,9 @@ async def get_user_graphs(request):
 
     run_git_command(["git", "pull", "origin", user], user_graphs_dir)
     user_graph_files = [f for f in os.listdir(user_graphs_dir) if os.path.isfile(os.path.join(user_graphs_dir, f))]
+    # only .json files
+    user_graph_files = [f for f in user_graph_files if f.endswith(".json")]
+
     options_data = [{"value": f, "label": f} for f in user_graph_files if f != ""]
     # options_data = []
 
