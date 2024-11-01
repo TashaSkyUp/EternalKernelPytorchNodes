@@ -465,7 +465,6 @@ class XttsNode:
                 generated_files = generated.split(")")[0]
                 generated_files = eval(generated_files)
 
-
                 # Get the output folder
                 output_folder = os.path.dirname(kwargs.get('file', "output.wav"))
 
@@ -539,6 +538,44 @@ class MovieCrossfadeMultiAudio:
         return {
             "video": self.video
         }
+
+
+@ETK_audio_base
+class EtkSaveAudio:
+    def __init__(self):
+        self.type = "output"
+        self.prefix_append = ""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"audio": ("AUDIO",),
+                             "filename": ("STRING", {"default": ""})},
+                }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "save_audio"
+
+    OUTPUT_NODE = True
+
+    def save_audio(self, audio, filename=""):
+        results = list()
+
+        for (batch_number, waveform) in enumerate(audio["waveform"].cpu()):
+            file = f"{filename}_{batch_number:05}.flac"
+
+            buff = io.BytesIO()
+            torchaudio.save(buff, waveform, audio["sample_rate"], format="FLAC")
+            buff = insert_or_replace_vorbis_comment(buff, metadata)
+
+            with open(file, 'wb') as f:
+                f.write(buff.getbuffer())
+
+            results.append({
+                "filename": file,
+                "type": self.type
+            })
+
+        return {"ui": {"audio": results}, "result": (filename,)}
 
 
 @ETK_audio_base
