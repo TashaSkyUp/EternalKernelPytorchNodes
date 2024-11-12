@@ -559,6 +559,7 @@ class EtkSaveAudio:
 
     def save_audio(self, audio, filename=""):
         results = list()
+        filename += self.prefix_append
 
         for (batch_number, waveform) in enumerate(audio["waveform"].cpu()):
             file = f"{filename}_{batch_number:05}.flac"
@@ -576,6 +577,23 @@ class EtkSaveAudio:
             })
 
         return {"ui": {"audio": results}, "result": (filename,)}
+
+
+@ETK_audio_base
+class PreviewAudio(EtkSaveAudio):
+
+    def __init__(self):
+        import folder_paths
+        self.output_dir = folder_paths.get_temp_directory()
+        self.type = "temp"
+        self.prefix_append = folder_paths.get_temp_directory() + "_temp_" + ''.join(
+            random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"audio": ("AUDIO",), },
+                }
 
 
 @ETK_audio_base

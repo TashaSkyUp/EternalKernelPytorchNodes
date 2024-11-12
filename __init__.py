@@ -44,6 +44,14 @@ def patch_validate_inputs():
 # Apply the patch when this module is imported
 patch_validate_inputs()
 
+from . import AVF
+
+# Update NODE_CLASS_MAPPINGS with AVF nodes
+NODE_CLASS_MAPPINGS.update(AVF.NODE_CLASS_MAPPINGS)
+
+# Update NODE_DISPLAY_NAME_MAPPINGS with AVF nodes
+NODE_DISPLAY_NAME_MAPPINGS.update(AVF.NODE_DISPLAY_NAME_MAPPINGS)
+
 
 from . import basic
 from . import image
@@ -58,7 +66,7 @@ from . import pytorch_nodes
 from . import youtube_nodes
 from . import torchvision_nodes
 from . import hf_diffusers_nodes
-from . import audio_video_folder
+#from . import audio_video_folder
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

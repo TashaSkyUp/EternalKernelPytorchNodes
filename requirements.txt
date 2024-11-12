@@ -1,4 +1,4 @@
-git+https://github.com/facebookresearch/audiocraft.git
+#git+https://github.com/facebookresearch/audiocraft.git
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
