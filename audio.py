@@ -3,6 +3,8 @@ import shutil
 import copy
 import imageio_ffmpeg as ffmpeg
 import joblib
+
+from comfy_extras.nodes_audio import insert_or_replace_vorbis_comment
 from .config import config_settings
 
 temp_dir = config_settings["tmp_dir"]
@@ -558,15 +560,20 @@ class EtkSaveAudio:
     OUTPUT_NODE = True
 
     def save_audio(self, audio, filename=""):
+        import torchaudio
+        import io
+
+
         results = list()
         filename += self.prefix_append
+
 
         for (batch_number, waveform) in enumerate(audio["waveform"].cpu()):
             file = f"{filename}_{batch_number:05}.flac"
 
             buff = io.BytesIO()
             torchaudio.save(buff, waveform, audio["sample_rate"], format="FLAC")
-            buff = insert_or_replace_vorbis_comment(buff, metadata)
+            buff = insert_or_replace_vorbis_comment(buff, {})
 
             with open(file, 'wb') as f:
                 f.write(buff.getbuffer())

@@ -135,37 +135,50 @@ def torch_image_show(image):
 
 @ETK_image_base
 class LoadImageFromPath:
-    """receives a comfyui "IMAGE" tensor of BHWC and a path to a file converts the tensor to a PIL image and saves it to the path"""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
-                "path": ("STRING", {"default": "output/image.png"}),
+                "image_path": ("STRING", {"default": "output/image.png"}),
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("saved_path",)
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
     FUNCTION = "execute"
     OUTPUT_NODE = True
 
-    def execute(self, image: torch.Tensor, path: str):
+    def execute(self, image_path: str):
+        import torch
         from PIL import Image
         import numpy as np
         from pathlib import Path
 
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(image_path)
+        loaded_image = Image.open(path)
+        loaded_image = np.array(loaded_image).astype(np.float32) / 255.0
+        loaded_image = torch.from_numpy(loaded_image)[None,]
 
-        # Convert torch tensor to PIL Image
-        pil_image = Image.fromarray((image.squeeze().cpu().numpy() * 255).astype(np.uint8))
+        # torch tensor mus be (B,W,H,C)
+        if len(loaded_image.shape) == 3:
+            loaded_image = loaded_image.unsqueeze(0)
+        return (loaded_image,)
 
-        # Save image
-        pil_image.save(path)
+    @classmethod
+    def IS_CHANGED(s, image_path):
+        import hashlib
+        from pathlib import Path
+        # use the file path and modified date + file size (all as a string) to determine if the file has changed
+        path = Path(image_path)
+        m = hashlib.sha256()
+        m.update(str(path.stat().st_mtime).encode())
+        m.update(str(path.stat().st_size).encode())
+        return m.digest().hex()
 
-        return (str(path),)
+
+
+
 
 
 @ETK_image_base
@@ -2372,6 +2385,7 @@ class StripAlphaChannel:
         >>> result = sac.strip_alpha_channel(image)
         >>> torch_image_show(result[0])
         """
+        from copy import deepcopy
 
         return (deepcopy(image[..., :3]),)
 
