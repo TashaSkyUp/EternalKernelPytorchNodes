@@ -1746,7 +1746,10 @@ class ListKSampler:
                     if v in [[-1], [0], [None]]:
                         sample[key] = random.randint(0, int(10e10 + 1))
                     else:
-                        sample[key] = v
+                        if isinstance(v,int):
+                            sample[key] = v
+                        if isinstance(v,list):
+                            sample[key] = v[i]
                 elif len(v) == 1:
                     sample[key] = v[0]
                 else:
@@ -1972,16 +1975,16 @@ class ListVAEDecode:
         # assign
         final_tensor = torch.zeros((final_bsize, width, height, channels), device="cpu")
         cur_idx = 0
-
+        del i
         while True:
 
-            if len(results[i].shape) == 4:
-                if results[i].shape[0] == 1:
-                    final_tensor[cur_idx] = results[i]
+            if len(results[cur_idx].shape) == 4:
+                if results[cur_idx].shape[0] == 1:
+                    final_tensor[cur_idx] = results[cur_idx]
                     cur_idx += 1
                 else:
-                    for j in range(results[i].shape[0]):
-                        res = results[i][j]
+                    for j in range(results[cur_idx].shape[0]):
+                        res = results[cur_idx][j]
                         if len(res.shape) == 3:
                             res = res.unsqueeze(0)
                         final_tensor[cur_idx] = res
