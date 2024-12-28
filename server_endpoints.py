@@ -424,6 +424,9 @@ if not TEST:
                             return part1
                         if isinstance(part1, web.Request):
                             modified_func_response = await post_handler(part1)
+                        # if it has a json() method then it is a request, careful it might not have the attribute at all
+                        if hasattr(part1, "json"):
+                            modified_func_response = await post_handler(part1)
                         if isinstance(part1, dict):
                             a = await post_handler(part1)
                             b = part1
@@ -602,6 +605,76 @@ if not TEST:
     async def my_get_hijack_after(response):
         return response
 
+    # ------------------------------------
+    # WRAPPER: so we can override json()
+    # ------------------------------------
+    class ModifiedRequestWrapper:
+        """
+        A wrapper around the original `web.Request` that overrides
+        the `json()` method to return our custom dictionary.
+        """
+        def __init__(self, original_request: web.Request, new_json: dict):
+            self._original_request = original_request
+            self._new_json = new_json
 
-    if __name__ != 'EternalKernelLiteGraphNodes.server_endpoints':
-        hijack_prompt_server("/prompt", after_get_func=my_get_hijack_after, before_post_func=my_post_hijack_before)
+        def __getattr__(self, name):
+            # Delegate everything except .json() to the original request
+            return getattr(self._original_request, name)
+
+        async def json(self):
+            # Return our overridden data
+            return self._new_json
+
+    def fill_prompt(raw_json,**kwargs):
+        for node_num,node in raw_json.items():
+            inputs = node["inputs"]
+            if node["class_type"]=="RequestInput":
+                key = inputs["key"]
+                if key in kwargs:
+                    raw_json[node_num]["inputs"]["overridden_value"] = kwargs[key]
+        return raw_json
+
+
+    # ------------------------------------------------------------------
+    # This function checks for "api_file" and if found, injects its JSON
+    # into the request by returning a ModifiedRequestWrapper.
+    # ------------------------------------------------------------------
+    async def my_post_hijack_before_api_file(request: web.Request):
+        import os
+        import json
+
+        # Convert the request body into a dict
+        data = await request.json()
+        api_file = data.get("api_file", None)
+
+        if api_file:
+            kwargs = data.get("kwargs", {})
+            # Build path to the file in ./api_graphs
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            api_graphs_dir = os.path.join(current_dir, "api_graphs")
+            file_path = os.path.join(api_graphs_dir, api_file)
+
+            if not os.path.isfile(file_path):
+                return web.json_response({"error": f"api_file '{api_file}' not found"}, status=400)
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                loaded_json = json.load(f)
+
+            filled_json = fill_prompt(loaded_json,**kwargs)
+
+            # Insert loaded_json into the "prompt" key
+            data["prompt"] = filled_json
+
+            # Return a new request-like object that yields `data` from .json()
+            return ModifiedRequestWrapper(request, data)
+
+        # If "api_file" isn't there, just return the original request
+        return request
+
+    if __name__ == 'EternalKernelLiteGraphNodes.server_endpoints':
+        async def both_post_hijack_before(request: web.Request):
+            thing1 = await my_post_hijack_before(request)
+            thing2 = await my_post_hijack_before_api_file(thing1)
+            return thing2
+
+        hijack_prompt_server("/prompt", after_get_func=my_get_hijack_after, before_post_func=both_post_hijack_before)
