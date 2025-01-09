@@ -593,20 +593,11 @@ class AnyToObject:
     FUNCTION = "get_value"
     CATEGORY = "conversion"
 
-    def get_value(self, Any):
-        image_o = None
-        latent_o = None
-        conditioning_o = None
-        model_o = None
-
-        if isinstance(Any, COMFY_PYTHON_CLAS_NAMES['IMAGE']):
-            image_o = Any
-        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['LATENT']):
-            latent_o = Any
-        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['CONDITIONING']):
-            conditioning_o = Any
-        elif isinstance(Any, COMFY_PYTHON_CLAS_NAMES['MODEL']):
-            model_o = Any
+    def get_value(self, x):
+        image_o = x
+        latent_o = x
+        conditioning_o = x
+        model_o = x
 
         return (image_o, latent_o, conditioning_o, model_o,)
 
