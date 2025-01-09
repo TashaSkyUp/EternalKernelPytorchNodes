@@ -584,7 +584,7 @@ class AnyToObject:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "Any": ("*", {
+                "x": ("*", {
                     "default": None,
                 }),
             }}
