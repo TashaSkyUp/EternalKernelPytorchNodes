@@ -288,6 +288,7 @@ class TinyTxtToImg:
                 "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
                 "one_seed": ([True, False], {"default": False}),
                 "unload_model": ([True, False], {"default": True}),
+                "func_only": ([True, False], {"default": True}),
 
             },
             "optional": {
@@ -507,6 +508,264 @@ class TinyTxtToImg:
             gc.collect()
         return ret
 
+@ETK_image_base
+class TinyTxtToImgV2:
+    """small text to image generator"""
+    share_clip = None
+    share_mdl = None
+    share_vae = None
+
+    def __init__(self):
+        print("ETK> TinyTxtToImgV2 init")
+        self.mdl = None
+        self.clp = None
+        self.vae = None
+
+        self.vision = None
+        self.steps = 10
+        self.cfg = 8
+        self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
+        self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
+        self.positive = None
+        self.negative = None
+        self.width = 512
+        self.height = 512
+        self.batch_size = 1
+        self.denoise = 1.0
+        self.latent_image = None
+        self.samples = None
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True}),
+                "neg_prompt": ("STRING", {"multiline": True}),
+                "clip_encoder": (["comfy -ignore below", "advanced"],),
+                "token_normalization": (["none", "mean", "length", "length+mean"],),
+                "weight_interpretation": (["comfy", "A1111", "compel", "comfy++"],),
+                "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+                "one_seed": ([True, False], {"default": False}),
+                "unload_model": ([True, False], {"default": True}),
+                "func_only": ([True, False], {"default": True}),
+            },
+            "optional": {
+                "name": ("STRING", {"multiline": False, "default": "tinytxt2img"}),
+                "overrides": ("STRING", {"multiline": True, "default": '{"width":768,"height":768,"steps":20}'}),
+                "latent": ("LATENT",),
+                "pos_cond": ("CONDITIONING",),
+                "neg_cond": ("CONDITIONING",),
+                "image": ("IMAGE",),
+            }
+        }
+
+    CATEGORY = "ETK"
+
+    RETURN_TYPES = ("IMAGE", "FUNC", "LATENT", "CONDITIONING", "CONDITIONING",)
+    RETURN_NAMES = ("image", "FUNC", "latent", "positive", "negative",)
+    FUNCTION = "tinytxt2img"
+
+    def tinytxt2img(self, **kwargs):
+        """If func_only is True, return a callable function instead of immediately generating an image."""
+        import torch
+        import comfy.model_management as mm
+        import random
+        import json
+        import gc
+        from nodes import CLIPTextEncode
+
+        torch.cuda.empty_cache()
+
+        def _do_generation(**override_kwargs):
+            """This inner function carries out the entire generation logic, using merged arguments."""
+            # Merge original kwargs with any overrides passed to _do_generation
+            all_args = dict(kwargs)
+            all_args.update(override_kwargs)
+
+            unload_model = all_args.get("unload_model", True)
+            prompt = all_args.get("prompt", "")
+            neg_prompt = all_args.get("neg_prompt", "")
+            clip_encoder = all_args.get("clip_encoder", "comfy -ignore below")
+            token_normalization = all_args.get("token_normalization", "length+mean")
+            weight_interpretation = all_args.get("weight_interpretation", "comfy++")
+            ckpt_name = all_args.get("ckpt_name", None)
+
+            model_ref = all_args.get("model", None)
+            vae = all_args.get("vae", None)
+            clip = all_args.get("clip", None)
+
+            overrides = all_args.get("overrides", "")
+            name = all_args.get("name", "tinytxt2img")
+            FUNC = all_args.get("FUNC", None)
+            render_what = all_args.get("render_what", "image")
+
+            self.latent_image = all_args.get("latent", None)
+            self.pos_cond = all_args.get("pos_cond", None)
+            self.neg_cond = all_args.get("neg_cond", None)
+            self.seed = all_args.get("seed", random.randint(0, 2 ** 32 - 1))
+            self.one_seed_per_batch = all_args.get("one_seed", False)
+            self.denoise = all_args.get("denoise", 1.0)
+            self.steps = all_args.get("steps", 10)
+
+            if model_ref and vae and clip:
+                self.mdl = model_ref
+                self.vae = vae
+                self.clp = clip
+            else:
+                from nodes import CheckpointLoaderSimple
+                self.mdl, self.clp, self.vae = CheckpointLoaderSimple.load_checkpoint(
+                    None, ckpt_name=ckpt_name
+                )
+
+            # Check if an input image is provided
+            input_image = all_args.get("image", None)
+            if input_image is not None:
+                with torch.no_grad():
+                    self.vae.device = torch.device("cuda:0")
+                    self.vae.first_stage_model = self.vae.first_stage_model.to("cuda:0")
+                    input_image = input_image.to("cuda")
+                    q = self.vae.encode(input_image)
+                    self.latent_image = {"samples": q}
+
+            self.cfg = all_args.get("cfg", 8)
+
+            # Sampler logic
+            if "sampler_name" not in all_args and ckpt_name:
+                if "lcm" in ckpt_name.lower():
+                    self.sampler_name = comfy.samplers.KSampler.SAMPLERS[18]
+                    self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
+                else:
+                    self.sampler_name = comfy.samplers.KSampler.SAMPLERS[0]
+                    self.scheduler = comfy.samplers.KSampler.SCHEDULERS[0]
+            else:
+                self.sampler_name = all_args.get("sampler_name", comfy.samplers.KSampler.SAMPLERS[0])
+                self.scheduler = all_args.get("scheduler", comfy.samplers.KSampler.SCHEDULERS[0])
+
+            self.positive = prompt
+            self.negative = neg_prompt
+            self.width = 512
+            self.height = 512
+            self.batch_size = 1
+            if not self.denoise:
+                self.denoise = 1.0
+
+            # Process overrides if provided
+            if overrides:
+                if overrides != "":
+                    overrides = overrides.replace("'", "\"")
+                    if overrides[0] != "{":
+                        overrides = "{" + overrides + "}"
+                    valid_dict = json.loads(overrides)
+                    for k, v in valid_dict.items():
+                        if k in self.__dict__:
+                            self.__setattr__(k, v)
+                        else:
+                            print(f"invalid override key: {k}")
+
+            if FUNC is not None:
+                self.__dict__.update(FUNC(self.__dict__))
+
+            # Build positive/negative conditioning if not provided
+            if not self.pos_cond:
+                # Possibly advanced clip encode
+                self.clp.cond_stage_model = self.clp.cond_stage_model.to("cuda")
+                if clip_encoder == "comfy -ignore below":
+                    self.clp_encode = lambda x: CLIPTextEncode.encode(None, self.clp, x)[0]
+                    self.pos_cond = self.clp_encode(self.positive)
+                    self.neg_cond = self.clp_encode(self.negative)
+                else:
+                    from nodes import CLIPTextEncodeAdvanced
+                    self.clp_encode = lambda x: CLIPTextEncodeAdvanced.encode(
+                        None, self.clp, x, token_normalization, weight_interpretation
+                    )[0]
+                    try:
+                        self.pos_cond = self.clp_encode(self.positive)
+                        self.neg_cond = self.clp_encode(self.negative)
+                    except Exception as e:
+                        print(e)
+                        raise ValueError("advanced clip encoder failed")
+
+                self.clp.cond_stage_model = self.clp.cond_stage_model.to("cpu")
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            if self.latent_image is None:
+                from nodes import EmptyLatentImage
+                self.latent_image = EmptyLatentImage().generate(
+                    self.width, self.height, self.batch_size
+                )[0]
+
+            image = None
+            # Only sample/decode if the user wants "latent" or "image" or "all"
+            if "latent" in render_what or "all" in render_what or "image" in render_what:
+                self.KSampler = ETKKSampler()
+                self.samples = self.KSampler.sample(
+                    model=self.mdl,
+                    seed=self.seed,
+                    steps=self.steps,
+                    cfg=self.cfg,
+                    sampler_name=self.sampler_name,
+                    scheduler=self.scheduler,
+                    latent_image=self.latent_image,
+                    pos_cond=self.pos_cond,
+                    neg_cond=self.neg_cond,
+                    positive=self.pos_cond,
+                    negative=self.neg_cond,
+                    denoise=self.denoise,
+                    one_seed_per_batch=self.one_seed_per_batch
+                )[0]
+
+            if "image" in render_what or "all" in render_what:
+                self.samples["samples"] = self.samples["samples"].to("cuda")
+                self.vae.first_stage_model = self.vae.first_stage_model.to("cuda:0")
+                self.vae.device = torch.device("cuda:0")
+                torch.cuda.empty_cache()
+
+                decoded_images = self.vae.decode(self.samples["samples"])
+                image = decoded_images.to("cpu")
+
+                self.vae.first_stage_model.to("cpu")
+                self.vae.device = torch.device("cpu")
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            self.FUNC = self.tinytxt2img
+            self.ARGS = all_args
+            self.samples["samples"] = self.samples["samples"].to("cpu")
+
+            ret = (
+                image,
+                self,
+                self.samples,
+                self.pos_cond,
+                self.neg_cond
+            )
+
+            # If requested, unload
+            if unload_model:
+                del self.mdl
+                del self.clp
+                del self.vae
+                if "vision" in self.__dict__:
+                    del self.vision
+                del self.samples
+                del self.FUNC
+                del self.ARGS
+                del self.pos_cond
+                del self.neg_cond
+                del self.KSampler
+                mm.free_memory(mm.get_total_memory(mm.get_torch_device()), mm.get_torch_device())
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            return ret
+
+        # If func_only is True, return a placeholder 5-tuple where the second item is our generator
+        if kwargs.get("func_only", False):
+            return (None, _do_generation, None, None, None)
+        else:
+            # Otherwise, perform the entire generation immediately and return the standard 5-tuple
+            return _do_generation()
 
 @ETK_image_base
 class PromptTemplate:
