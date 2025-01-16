@@ -365,7 +365,7 @@ if not TEST:
         from server import PromptServer
 
         # find the existing /prompt route
-        rts = [i for i, s in enumerate(PromptServer.instance.routes) if (route_path in str(s))]
+        rts = [i for i, s in enumerate(PromptServer.instance.routes) if (route_path == s.path)]
         print(f"found {len(rts)} routes to remove: {rts}")
 
         # remove the existing prompt route
@@ -423,10 +423,10 @@ if not TEST:
                         if isinstance(part1, web.Response):
                             return part1
                         if isinstance(part1, web.Request):
-                            modified_func_response = await post_handler(part1)
-                        # if it has a json() method then it is a request, careful it might not have the attribute at all
-                        if hasattr(part1, "json"):
-                            modified_func_response = await post_handler(part1)
+                            # modified_func_response = await post_handler(part1)
+                            # if it has a json() method then it is a request, careful it might not have the attribute at all
+                            if hasattr(part1, "json"):
+                                modified_func_response = await post_handler(part1)
                         if isinstance(part1, dict):
                             a = await post_handler(part1)
                             b = part1
@@ -678,3 +678,4 @@ if not TEST:
             return thing2
 
         hijack_prompt_server("/prompt", after_get_func=my_get_hijack_after, before_post_func=both_post_hijack_before)
+        pass
