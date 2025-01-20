@@ -283,6 +283,7 @@ class GetAudioFilesLengthsFromAudioFolder:
 
       audio_folder = audio_folder_def["audio_folder"]
       audio_files = os.listdir(audio_folder)
+      audio_files.sort()
       audio_files_lengths = []
 
       for audio_file in audio_files:
