@@ -375,6 +375,24 @@ class ValueToAny:
         return (None, dbg)
 
 
+class AnyToAny:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "A": ("*", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("*",)
+    FUNCTION = "get_value"
+    CATEGORY = "conversion"
+    RETURN_NAMES = ("*",)
+
+    def get_value(self, A):
+        return (A,)
+
+
 class IterableToAny:
     """takes LIST,DICT, and returns the value coded as *"""
 
@@ -393,12 +411,17 @@ class IterableToAny:
     CATEGORY = "conversion"
 
     def get_value(self, LIST=None, DICT=None):
-        if not isinstance(LIST, list):
-            return (LIST, f"LIST is not a list: {LIST} is type: {type(LIST)}")
+
         if LIST:
+            if not isinstance(LIST, list):
+                return (LIST, f"LIST is not a list: {LIST} is type: {type(LIST)}")
             dbg = f"found LIST: {LIST}"
             return (LIST, dbg,)
+
         if DICT:
+            if not isinstance(DICT, dict):
+                return (LIST, f"LIST is not a list: {LIST} is type: {type(LIST)}")
+
             dbg = f"found DICT: {DICT}"
             return (DICT, dbg,)
         dbg = f"found nothing, will return the first value that is not None; from LIST,DICT"
@@ -722,3 +745,4 @@ NODE_CLASS_MAPPINGS["SelectStrFromDict"] = SelectStrFromDict
 
 NODE_CLASS_MAPPINGS["StringToAny"] = StringToAny
 NODE_CLASS_MAPPINGS["StringsToList"] = StringsToList
+NODE_CLASS_MAPPINGS["AnyToAny"] = AnyToAny
