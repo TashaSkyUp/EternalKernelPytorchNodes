@@ -206,6 +206,12 @@ if not TEST:
             "client_id": None,
             "git_io": "HMG"
         },
+        "API": {
+            "password": "[REDACTED]",
+            "security": None,
+            "client_id": None,
+            "git_io": "HMG"
+        },
     }
     tmp_dir = config_settings["tmp_dir"]
     user_data_file = os.path.join(tmp_dir, 'user_data_tmp.json')
