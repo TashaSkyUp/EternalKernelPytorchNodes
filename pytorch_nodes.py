@@ -812,3 +812,480 @@ class TrainModel:
             # Clean return, no debug prints
             return (model, metrics_out, best_model,)
 
+
+# --- BEGIN RESTORED NODES FROM 5486f39 ---
+
+@ETK_pytorch_base
+class TensorsToDataset:
+    """
+    allows users to convert a tensor to a dataset
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "input_data": ("TORCH_TENSOR",),
+                "labels": ("TORCH_TENSOR",),
+            },
+            "optional": {
+                "move to device": (["cuda", "cpu"], {"default": "cpu"}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_DATASET",)
+    FUNCTION = "to_dataset"
+    def to_dataset(self, input_data, labels, **kwargs):
+        if input_data.is_leaf:
+            input_data.requires_grad = True
+        try:
+            if labels.is_leaf:
+                labels.requires_grad = True
+        except RuntimeError as e:
+            if "floating point and complex dtype" not in str(e):
+                raise e
+        move_to_device = kwargs.get("move to device", "cpu")
+        device_to_use = torch.device(move_to_device)
+        input_data = input_data.to(device_to_use)
+        labels = labels.to(device_to_use)
+        output = torch.utils.data.TensorDataset(input_data, labels)
+        return (output,)
+
+@ETK_pytorch_base
+class DatasetToDataloader:
+    """
+    allows users to convert a dataset to a dataloader
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dataset": ("TORCH_DATASET",),
+            }
+        }
+    RETURN_TYPES = ("TORCH_DATALOADER",)
+    FUNCTION = "to_dataloader"
+    def to_dataloader(self, dataset):
+        output = torch.utils.data.DataLoader(dataset)
+        return (output,)
+
+@ETK_pytorch_base
+class ComfyUIImageToPytorchTENSOR:
+    """
+    this just renames the object for compatibility with comfyui->pytorch
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            }
+        }
+    RETURN_TYPES = ("TORCH_TENSOR", "TORCH_TENSOR",)
+    RETURN_NAMES = ("b,h,w,c", "b,h,w,mean(c)",)
+    FUNCTION = "to_tensor"
+    def to_tensor(self, image):
+        out1 = torch.tensor(image)
+        out2 = torch.tensor(image).mean(dim=3)
+        return (out1, out2,)
+
+@ETK_pytorch_base
+class ListToTensor:
+    """
+    this just renames the object for compatibility with comfyui->pytorch
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        return {
+            "required": {
+                "list": ("LIST",),
+            },
+            "optional": {
+                "dtype": (valid_dtypes_str,),
+            }
+        }
+    RETURN_TYPES = ("TORCH_TENSOR",)
+    FUNCTION = "to_tensor"
+    def to_tensor(self, list, dtype="float"):
+        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        output = torch.tensor(list)
+        dts = dtype
+        dto_i = valid_dtypes_str.index(dts)
+        dto = valid_dtypes[dto_i]
+        output = output.to(dto)
+        return (output,)
+
+@ETK_pytorch_base
+class Activation:
+    """
+    uses values in torch.nn.modules.activation to create an activation function
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        activation_str_names = [i for i in torch.nn.modules.activation.__dict__.keys() if i[0] != "_"]
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "activation": (activation_str_names,),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "activation"
+    def activation(self, model, activation):
+        act = getattr(torch.nn.modules.activation, activation)()
+        model = model.insert(len(model), act)
+        return (model,)
+
+@ETK_pytorch_base
+class AddReshapeLayer:
+    """
+    Adds a reshape layer to the model.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "shape": ("STRING", {"default": "1, -1"}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_reshape_layer"
+    CATEGORY = "model"
+    def add_reshape_layer(self, model, shape):
+        import torch.nn as nn
+        t = tuple([int(i) for i in shape.split(",")])
+        reshape_layer_f = nn.Flatten(0)
+        reshape_layer_u = nn.Unflatten(0, t)
+        if isinstance(model, nn.Sequential):
+            model.insert(len(model), reshape_layer_f)
+            model.insert(len(model), reshape_layer_u)
+        else:
+            raise TypeError("The provided model is not an nn.Sequential model.")
+        return (model,)
+
+@ETK_pytorch_base
+class AddTransformerLayer:
+    """
+    Adds a transformer encoder layer to the model.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "input_features": ("INT", {"min": 1, "max": 2 ** 24}),
+                "num_heads": ("INT", {"min": 1}),
+                "feedforward_dim": ("INT", {"min": 1}),
+                "dropout": ("FLOAT", {"min": 0.0, "max": 1.0, "default": 0.1}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_transformer_layer"
+    CATEGORY = "model"
+    def add_transformer_layer(self, model, input_features, num_heads, feedforward_dim, dropout=0.1):
+        import torch.nn as nn
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=input_features,
+            nhead=num_heads,
+            dim_feedforward=feedforward_dim,
+            dropout=dropout
+        )
+        if isinstance(model, nn.Sequential):
+            model.insert(len(model), transformer_layer)
+        else:
+            raise TypeError("The provided model is not a nn.Sequential model.")
+        return (model,)
+
+@ETK_pytorch_base
+class PyTorchToDevice:
+    """
+    moves a pytorch object to a device
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "device": (["cuda", "cpu"], {"default": "cpu"}),
+            },
+            "optional": {
+                "model": ("TORCH_MODEL",),
+                "tensor": ("TORCH_TENSOR",),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL", "TORCH_TENSOR",)
+    FUNCTION = "to_device"
+    def to_device(self, device, model=None, tensor=None):
+        device_to_use = torch.device(device)
+        model_out = model.to(device_to_use) if model is not None else None
+        tensor_out = tensor.to(device_to_use) if tensor is not None else None
+        return (model_out, tensor_out,)
+
+@ETK_pytorch_base
+class ExtractLayersAsModel:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "start_idx": ("INT", {"min": 0}),
+                "end_idx": ("INT", {"min": 0}),
+                "freeze": (["True", "False"], {"default": "False"}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL", "STRING",)
+    RETURN_NAMES = ("model", "shapes_str",)
+    FUNCTION = "extract_layers"
+    CATEGORY = "model"
+    def extract_layers(self, model, start_idx, end_idx, freeze=False):
+        if freeze == "True":
+            freeze = True
+        else:
+            freeze = False
+        if not isinstance(model, nn.Sequential):
+            raise TypeError("The provided model is not a nn.Sequential model.")
+        if start_idx < 0 or end_idx < start_idx or end_idx >= len(model):
+            raise ValueError("Invalid start or end index.")
+        extracted_layers = nn.Sequential(*list(model.children())[start_idx:end_idx + 1])
+        shapes = []
+        for i in range(start_idx, end_idx + 1):
+            if hasattr(model[i], "in_features"):
+                shapes.append(model[i].in_features)
+            if hasattr(model[i], "out_features"):
+                shapes.append(model[i].out_features)
+        shapes_str = str(shapes)
+        if freeze:
+            for param in extracted_layers.parameters():
+                param.requires_grad = False
+        return (extracted_layers, shapes_str,)
+
+@ETK_pytorch_base
+class AddModelAsLayer:
+    """
+    given a model main and model addition adds the model addition to the end of the model main
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model_main": ("TORCH_MODEL",),
+                "model_addition": ("TORCH_MODEL",),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_model"
+    CATEGORY = "model"
+    def add_model(self, model_main, model_addition):
+        if not isinstance(model_main, nn.Sequential):
+            raise TypeError("model_main is not a nn.Sequential model.")
+        if not isinstance(model_addition, nn.Sequential):
+            raise TypeError("model_addition is not a nn.Sequential model.")
+        for layer in model_addition.children():
+            model_main.add_module(f"added_layer_{len(model_main)}", layer)
+        return (model_main,)
+
+@ETK_pytorch_base
+class RandomTensor:
+    """
+    creates a random tensor of a given shape and dtype and initialization method
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        return {
+            "required": {
+                "shape": ("STRING", {"default": "(1,1)"}),
+            },
+            "optional": {
+                "dtype": (valid_dtypes_str,),
+                "init_method": (
+                    ["rand", "randn", "randint", "randint_like", "rand_like", "randn_like"], {"default": "rand"}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_TENSOR",)
+    FUNCTION = "random_tensor"
+    CATEGORY = "tensor"
+    def random_tensor(self, shape, dtype="float", init_method="rand"):
+        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
+        dts = dtype
+        dto_i = valid_dtypes_str.index(dts)
+        dto = valid_dtypes[dto_i]
+        shape = shape[1:-1]
+        shape = shape.split(",")
+        shape = [int(s) for s in shape]
+        shape = tuple(shape)
+        if init_method == "rand":
+            output = torch.rand(shape, dtype=dto)
+        elif init_method == "randn":
+            output = torch.randn(shape, dtype=dto)
+        elif init_method == "randint":
+            output = torch.randint(shape, dtype=dto)
+        elif init_method == "randint_like":
+            output = torch.randint_like(shape, dtype=dto)
+        elif init_method == "rand_like":
+            output = torch.rand_like(shape, dtype=dto)
+        elif init_method == "randn_like":
+            output = torch.randn_like(shape, dtype=dto)
+        return (output,)
+
+@ETK_pytorch_base
+class GridSearchTraining:
+    """
+    Performs grid search training using the TrainModel class.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        default_param_grid = json.dumps({
+            'epochs': [1, 2],
+            'batch_size': [32, 64],
+            'loss_function': ['MSELoss', 'CrossEntropyLoss']
+        })
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "param_grid": ("STRING", {"default": default_param_grid}),
+            },
+            "optional": {
+                "dataset": ("TORCH_DATASET",),
+                "features tensor": ("TORCH_TENSOR",),
+                "labels tensor": ("TORCH_TENSOR",),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL", "DICT", "LIST")
+    RETURN_NAMES = ("best_model", "best_params", "all_metrics")
+    FUNCTION = "grid_search_train"
+    def grid_search_train(self, model, param_grid, **kwargs):
+        from itertools import product
+        param_grid_dict = json.loads(param_grid)
+        best_model = None
+        best_params = None
+        all_metrics = []
+        param_combinations = list(product(*param_grid_dict.values()))
+        for params in param_combinations:
+            train_kwargs = dict(zip(param_grid_dict.keys(), params))
+            train_kwargs.update(kwargs)
+            trainer = TrainModel()
+            trained_model, metrics, _ = trainer.train(model, **train_kwargs)
+            all_metrics.append(metrics)
+            if best_model is None or self.is_better(metrics, all_metrics):
+                best_model = trained_model
+                best_params = train_kwargs
+        return best_model, best_params, all_metrics
+    @staticmethod
+    def is_better(current_metrics, all_metrics):
+        return current_metrics[-1] < min(all_metrics, key=lambda m: m[-1])[-1]
+
+@ETK_pytorch_base
+class SaveTorchTensor:
+    """
+    Saves a torch tensor to a file using torch.save which has the required parameters of obj and f
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "tensor": ("TORCH_TENSOR", {"default": None}),
+                "file": ("STRING", {"default": "/somewhere/some.pt"}),
+            },
+        }
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "save_torch_tensor"
+    OUTPUT_NODE = True
+    def save_torch_tensor(self, tensor, file):
+        torch.save(tensor, file)
+        return (file,)
+
+@ETK_pytorch_base
+class LoadTorchTensor:
+    """
+    Loads a torch tensor from a file using torch.load
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "file": ("STRING", {"default": "/somewhere/some.pt"}),
+            },
+        }
+    RETURN_TYPES = ("TORCH_TENSOR",)
+    FUNCTION = "load_torch_tensor"
+    def load_torch_tensor(self, file):
+        return (torch.load(file),)
+
+@ETK_pytorch_base
+class FuncModifyModel:
+    """
+    allows users to modify a model using a function
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "function": ("STRING", {"default": "model", "multiline": True}),
+            }
+        }
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "modify_model"
+    def modify_model(self, model, function):
+        from copy import deepcopy
+        old_model = deepcopy(model)
+        exec(function)
+        new_model = model
+        if old_model == new_model:
+            raise ValueError("The model was not modified.")
+        return (new_model,)
+
+@ETK_pytorch_base
+class PlotSeriesString:
+    """
+    Plots a series of strings
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "series": ("STRING", {"default": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10"}),
+            },
+            "optional": {
+                "title": ("STRING", {"default": "Series Plot"}),
+                "xlabel": ("STRING", {"default": "X-axis"}),
+                "ylabel": ("STRING", {"default": "Y-axis"}),
+            }
+        }
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "plot_series_string"
+    OUTPUT_NODE = True
+    def plot_series_string(self, series, title="Series Plot", xlabel="X-axis", ylabel="Y-axis"):
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import io
+        import PIL
+        from PIL import Image
+        if isinstance(series, str):
+            series = series.split("\n")
+        elif isinstance(series, list):
+            pass
+        else:
+            raise ValueError("series must be a string or a list")
+        series = [float(s) for s in series]
+        plt.plot(series)
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        im = Image.open(buf)
+        im = np.array(im)
+        im = torch.tensor(im)
+        im = im.unsqueeze(0)
+        im = im.float()
+        im = im / 255.0
+        plt.close()
+        buf.close()
+        return (im,)
+
+# --- END RESTORED NODES FROM 5486f39 ---
+
