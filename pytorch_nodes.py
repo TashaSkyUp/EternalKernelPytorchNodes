@@ -11,10 +11,7 @@ try:
 except ImportError as e:
     from config import config_settings
 
-# from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-# from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
 
 def ETK_pytorch_base(cls):
@@ -814,3 +811,4 @@ class TrainModel:
                     best_model = torch.load(tmp, weights_only=False)
             # Clean return, no debug prints
             return (model, metrics_out, best_model,)
+
