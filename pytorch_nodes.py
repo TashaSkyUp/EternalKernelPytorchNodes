@@ -11,10 +11,10 @@ try:
 except ImportError as e:
     from config import config_settings
 
-# from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 # from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-#NODE_CLASS_MAPPINGS = {}
-#NODE_DISPLAY_NAME_MAPPINGS = {}
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
 def ETK_pytorch_base(cls):
@@ -25,8 +25,8 @@ def ETK_pytorch_base(cls):
         if pretty_name[i].isupper():
             pretty_name = pretty_name[:i] + " " + pretty_name[i:]
     cls.DISPLAY_NAME = pretty_name
-    # NODE_CLASS_MAPPINGS[cls.__name__] = cls
-    # NODE_DISPLAY_NAME_MAPPINGS[cls.DISPLAY_NAME] = pretty_name
+    NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    NODE_DISPLAY_NAME_MAPPINGS[cls.DISPLAY_NAME] = pretty_name
 
     # Wrap the function defined in the FUNCTION attribute
     func_name = getattr(cls, "FUNCTION", None)
