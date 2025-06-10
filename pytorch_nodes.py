@@ -706,6 +706,7 @@ class TrainModel:
                 loss_function = eval(loss_function)
 
             # Evaluate optimizer
+            import inspect
             optimizer = None
             if isinstance(optimizer_str, str):
                 if "(" in optimizer_str and ")" in optimizer_str:
@@ -713,9 +714,12 @@ class TrainModel:
                     optimizer = eval(optimizer_str)
                 else:
                     # Simple name, e.g. 'Adam' or 'SGD'
-                    if not optimizer_str.startswith("torch.optim."):
-                        optimizer_str = f"torch.optim.{optimizer_str}(model.parameters(), lr=0.001, momentum=0.9)"
-                    optimizer = eval(optimizer_str)
+                    opt_class = getattr(torch.optim, optimizer_str)
+                    sig = inspect.signature(opt_class.__init__)
+                    opt_kwargs = {"lr": 0.001}
+                    if "momentum" in sig.parameters:
+                        opt_kwargs["momentum"] = 0.9
+                    optimizer = opt_class(model.parameters(), **opt_kwargs)
             else:
                 optimizer = optimizer_str  # fallback
 
@@ -1286,6 +1290,4 @@ class PlotSeriesString:
         plt.close()
         buf.close()
         return (im,)
-
-# --- END RESTORED NODES FROM 5486f39 ---
 
