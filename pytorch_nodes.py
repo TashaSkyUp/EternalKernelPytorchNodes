@@ -154,7 +154,7 @@ class AddLinearLayerNode:
             "required": {
                 "model": ("TORCH_MODEL",),
                 "in_features": ("INT", {"min": 1, "max": 2 ** 24}),
-                "out_features": ("INT", {"min": 1}),
+                "out_features": ("INT", {"min": 1, "max": 1_000_000_000}),
                 "bias": ([True, False],),
                 "initialization": (["default", "xavier_uniform", "xavier_normal"],),
                 "dtype": (["float32", "float64", "float16", "int32", "int64", "int16", "int8", "uint8"],),
@@ -1483,6 +1483,45 @@ class PlotSeriesString:
         buf.close()
 
         return (im,)
+
+
+@ETK_pytorch_base
+class DescribeModelInputNode:
+    """
+    Outputs a detailed description of the input(s) expected by a given PyTorch model.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "describe_model_input"
+    CATEGORY = "model"
+
+    def describe_model_input(self, model):
+        import torch.nn as nn
+        desc = []
+        # Try to find the first Linear/Conv layer or input signature
+        for layer in model.children():
+            if hasattr(layer, 'in_features'):
+                desc.append(f"First Linear layer: in_features={layer.in_features}, dtype={layer.weight.dtype}")
+                break
+            elif hasattr(layer, 'in_channels'):
+                desc.append(f"First Conv layer: in_channels={layer.in_channels}, kernel_size={getattr(layer, 'kernel_size', '?')}, dtype={layer.weight.dtype}")
+                break
+        else:
+            # Fallback: try to infer from forward signature
+            try:
+                sig = str(model.forward.__annotations__)
+                desc.append(f"Model forward signature: {sig}")
+            except Exception:
+                desc.append("Could not determine input details from model layers or signature.")
+        # Optionally, add more info (e.g., expected input shape if available)
+        return ("\n".join(desc),)
 
 
 if __name__ == "__main__":
