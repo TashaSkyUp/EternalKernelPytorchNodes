@@ -11,7 +11,7 @@ try:
 except ImportError as e:
     from config import config_settings
 
-from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+# from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 # from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
