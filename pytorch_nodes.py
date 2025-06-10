@@ -643,8 +643,8 @@ class TrainModel:
             },
             "optional": {
                 "dataset": ("TORCH_DATASET",),
-                "features tensor": ("TORCH_DATASET",),
-                "labels tensor": ("TORCH_DATASET",),
+                "features tensor": ("TORCH_TENSOR",),
+                "labels tensor": ("TORCH_TENSOR",),
                 "epochs": ("INT", {"default": 1, "min": 1, "max": 2 ** 24}),
                 "batch_size": ("INT", {"default": 1}),
                 "loss_function": (loss_functions,),
@@ -667,11 +667,12 @@ class TrainModel:
                 optimizer.state[param] = torch.optim.Optimizer.StateDict()
 
     def train(self, model, **kwargs):
+        # Consistent boolean handling for create_samples
         create_samples = kwargs.get("create_samples", "FALSE")
-        if create_samples == "TRUE":
-            create_samples = True
+        if isinstance(create_samples, str):
+            create_samples = create_samples.upper() == "TRUE"
         else:
-            create_samples = False
+            create_samples = bool(create_samples)
 
         with torch.inference_mode(False):
             train_dataset = kwargs.get("dataset", None)
@@ -683,43 +684,50 @@ class TrainModel:
                 else:
                     train_dataset = torch.utils.data.TensorDataset(features_tensor, labels_tensor)
 
-            epochs = kwargs.get("epochs", "1")
-            batch_size = kwargs.get("batch_size", "1")
-            loss_function = kwargs.get("loss_function", "torch.nn.CrossEntropyLoss()")
-            optimizer = kwargs.get("optimizer", "torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)")
-            metrics = kwargs.get("metrics", "torch.nn.CrossEntropyLoss()")
+            # Consistent int conversion for epochs and batch_size
+            epochs = kwargs.get("epochs", 1)
+            batch_size = kwargs.get("batch_size", 1)
+            try:
+                epochs = int(epochs)
+            except Exception:
+                epochs = 1
+            try:
+                batch_size = int(batch_size)
+            except Exception:
+                batch_size = 1
 
-            loss_function = eval(f"torch.nn.{loss_function}()")
-            optimizer = eval(optimizer)
+            # Consistent string handling for loss_function, optimizer, metrics
+            loss_function = kwargs.get("loss_function", "CrossEntropyLoss")
+            optimizer_str = kwargs.get("optimizer", "torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)")
+            metrics_str = kwargs.get("metrics", "torch.nn.CrossEntropyLoss()")
 
-            metrics = eval(metrics)
-            epochs = int(epochs)
+            # Evaluate loss function
+            if isinstance(loss_function, str):
+                if not loss_function.startswith("torch.nn."):
+                    loss_function = f"torch.nn.{loss_function}()"
+                loss_function = eval(loss_function)
+            # Evaluate optimizer
+            optimizer = eval(optimizer_str)
+            # Evaluate metrics
+            metrics = eval(metrics_str)
 
-            train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=int(batch_size), shuffle=True,
-                                                           num_workers=0)
+            train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
             for param in model.parameters():
                 param.requires_grad = True
 
             metrics_out = []
             device = kwargs.get("device", "torch.device('cpu')")
-
-            e_device = eval(device)
+            e_device = eval(device) if isinstance(device, str) else device
 
             optimizer_to(optimizer, e_device)
-
             model.to(e_device)
-            # train_dataloader.to(eval(device))
-            model.train()
             torch.set_grad_enabled(True)
-            # clear the cache do other things to free up memory
             torch.cuda.empty_cache()
-            # set best_l to large value
             best_l = 1024 ** 3
             best_epoch = 0
 
             import uuid
-            # get the env variable for the temp directory
             import os
             tmpdir = config_settings["tmp_dir"]
             tmp = os.path.join(tmpdir, str(uuid.uuid4()))
@@ -738,7 +746,6 @@ class TrainModel:
                 print(f"Epoch {epoch} complete")
                 l = metrics(outputs, batch_labels)
                 metrics_out.append(l)
-                # delete tmp first
                 if os.path.exists(tmp):
                     os.remove(tmp)
                 torch.save(model, tmp)
@@ -749,43 +756,27 @@ class TrainModel:
                         import PIL
                         from PIL import Image
                         best_l = tot_loss
-                        # save the model so we don't have to retrain it in memory
-
-                        # save an output as a PIL image
-
                         out_X = None
                         for i in range(len(outputs)):
                             out_tensor = self.make_image_tensor(outputs, i)
-                            # add to the right of out_X
                             if out_X is None:
                                 out_X = out_tensor
                             else:
                                 out_X = np.concatenate((out_X, out_tensor), axis=1)
-
                         out_y = None
                         for i in range(len(outputs)):
                             label_Tensor = self.make_image_tensor(batch_labels, i)
-                            # add to the right of out_y
                             if out_y is None:
                                 out_y = label_Tensor
                             else:
                                 out_y = np.concatenate((out_y, label_Tensor), axis=1)
-                        # add out_y to the bottom of out_X
                         out_tensor = np.concatenate((out_X, out_y), axis=0)
-
-                        # get the mse of the output and the label
                         mse = np.mean((out_X - out_y) ** 2)
-
-                        # stack them axis 0
-
                         out_tensor = PIL.Image.fromarray(out_tensor)
                         out_tensor.save(f"out{i}_{mse}_{str(loss.item())}.png")
-
-                # load the best model
                 if os.path.exists(tmp):
                     best_model = torch.load(tmp)
 
-            # convert metrics to a list of floats
             metrics_out = [float(metric) for metric in metrics_out]
             model.to(torch.device("cpu"))
             del train_dataloader
