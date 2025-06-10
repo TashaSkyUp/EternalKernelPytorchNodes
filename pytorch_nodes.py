@@ -1,5 +1,5 @@
 import torch
-import folder_paths
+# import folder_paths
 import torchvision
 import torch.nn as nn
 import functools
@@ -10,7 +10,9 @@ try:
     from .config import config_settings
 except ImportError as e:
     from config import config_settings
-from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+# from pytorch_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+# from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 #NODE_CLASS_MAPPINGS = {}
 #NODE_DISPLAY_NAME_MAPPINGS = {}
 
@@ -23,8 +25,8 @@ def ETK_pytorch_base(cls):
         if pretty_name[i].isupper():
             pretty_name = pretty_name[:i] + " " + pretty_name[i:]
     cls.DISPLAY_NAME = pretty_name
-    NODE_CLASS_MAPPINGS[cls.__name__] = cls
-    NODE_DISPLAY_NAME_MAPPINGS[cls.DISPLAY_NAME] = pretty_name
+    # NODE_CLASS_MAPPINGS[cls.__name__] = cls
+    # NODE_DISPLAY_NAME_MAPPINGS[cls.DISPLAY_NAME] = pretty_name
 
     # Wrap the function defined in the FUNCTION attribute
     func_name = getattr(cls, "FUNCTION", None)
@@ -629,14 +631,13 @@ class TrainModel:
 
     @classmethod
     def INPUT_TYPES(cls):
-        # iterate over tourch.nn tp fomd amy attributes that end in "Loss" and add them to the list
-        loss_functions = []
-        for attr in dir(torch.nn):
-            if attr.endswith("Loss"):
-                loss_functions.append(attr)
-
+        # Gather available loss functions
+        loss_functions = [attr for attr in dir(torch.nn) if attr.endswith("Loss") and callable(getattr(torch.nn, attr))]
+        # Gather available optimizers
+        optimizers = [attr for attr in dir(torch.optim) if attr[0].isupper() and callable(getattr(torch.optim, attr))]
+        # Gather available metrics (for now, just use loss functions + 'accuracy')
+        metrics = ["accuracy"] + loss_functions
         return {
-
             "required": {
                 "model": ("TORCH_MODEL",),
 
@@ -647,9 +648,9 @@ class TrainModel:
                 "labels tensor": ("TORCH_TENSOR",),
                 "epochs": ("INT", {"default": 1, "min": 1, "max": 2 ** 24}),
                 "batch_size": ("INT", {"default": 1}),
-                "loss_function": (loss_functions,),
-                "optimizer": ("STRING", {"default": "torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)"}),
-                "metrics": ("STRING", {"default": "torch.nn.CrossEntropyLoss()"}),
+                "loss_function": (loss_functions, {"default": "CrossEntropyLoss"}),
+                "optimizer": (optimizers, {"default": "SGD"}),
+                "metrics": (metrics, {"default": "accuracy"}),
                 "device": ("STRING", {"default": "torch.device('cpu')"}),
                 "create_samples": (["TRUE", "FALSE"], {"default": "FALSE"}),
             }
@@ -698,18 +699,49 @@ class TrainModel:
 
             # Consistent string handling for loss_function, optimizer, metrics
             loss_function = kwargs.get("loss_function", "CrossEntropyLoss")
-            optimizer_str = kwargs.get("optimizer", "torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)")
-            metrics_str = kwargs.get("metrics", "torch.nn.CrossEntropyLoss()")
+            optimizer_str = kwargs.get("optimizer", "SGD")
+            metrics_str = kwargs.get("metrics", "CrossEntropyLoss")
 
             # Evaluate loss function
             if isinstance(loss_function, str):
                 if not loss_function.startswith("torch.nn."):
                     loss_function = f"torch.nn.{loss_function}()"
                 loss_function = eval(loss_function)
+
             # Evaluate optimizer
-            optimizer = eval(optimizer_str)
+            optimizer = None
+            if isinstance(optimizer_str, str):
+                if "(" in optimizer_str and ")" in optimizer_str:
+                    # Full expression, e.g. torch.optim.Adam(model.parameters(), lr=0.001)
+                    optimizer = eval(optimizer_str)
+                else:
+                    # Simple name, e.g. 'Adam' or 'SGD'
+                    if not optimizer_str.startswith("torch.optim."):
+                        optimizer_str = f"torch.optim.{optimizer_str}(model.parameters(), lr=0.001, momentum=0.9)"
+                    optimizer = eval(optimizer_str)
+            else:
+                optimizer = optimizer_str  # fallback
+
             # Evaluate metrics
-            metrics = eval(metrics_str)
+            metrics = None
+            if isinstance(metrics_str, str):
+                if metrics_str.lower() == "accuracy":
+                    def accuracy_fn(outputs, labels):
+                        # For classification: outputs are logits or probabilities
+                        if outputs.dim() > 1 and outputs.size(1) > 1:
+                            preds = outputs.argmax(dim=1)
+                        else:
+                            preds = (outputs > 0.5).long()
+                        if labels.dim() > 1 and labels.size(1) > 1:
+                            labels = labels.argmax(dim=1)
+                        return (preds == labels).float().mean().item()
+                    metrics = accuracy_fn
+                elif not metrics_str.startswith("torch.nn."):
+                    metrics = eval(f"torch.nn.{metrics_str}()")
+                else:
+                    metrics = eval(metrics_str)
+            else:
+                metrics = metrics_str  # fallback
 
             train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
@@ -729,7 +761,12 @@ class TrainModel:
 
             import uuid
             import os
-            tmpdir = config_settings["tmp_dir"]
+            tmpdir = config_settings.get("tmp_dir", "./temp")
+            try:
+                os.makedirs(tmpdir, exist_ok=True)
+            except PermissionError:
+                tmpdir = "./temp"
+                os.makedirs(tmpdir, exist_ok=True)
             tmp = os.path.join(tmpdir, str(uuid.uuid4()))
 
             for epoch in range(epochs):
@@ -743,12 +780,11 @@ class TrainModel:
                     tot_loss += loss.item()
                     loss.backward()
                     optimizer.step()
-                print(f"Epoch {epoch} complete")
                 l = metrics(outputs, batch_labels)
                 metrics_out.append(l)
                 if os.path.exists(tmp):
                     os.remove(tmp)
-                torch.save(model, tmp)
+                torch.save(model, tmp, _use_new_zipfile_serialization=True, pickle_protocol=4)
 
                 if tot_loss < best_l:
                     if create_samples:
@@ -775,784 +811,6 @@ class TrainModel:
                         out_tensor = PIL.Image.fromarray(out_tensor)
                         out_tensor.save(f"out{i}_{mse}_{str(loss.item())}.png")
                 if os.path.exists(tmp):
-                    best_model = torch.load(tmp)
-
-            metrics_out = [float(metric) for metric in metrics_out]
-            model.to(torch.device("cpu"))
-            del train_dataloader
-            torch.cuda.empty_cache()
-            del optimizer, loss_function
+                    best_model = torch.load(tmp, weights_only=False)
+            # Clean return, no debug prints
             return (model, metrics_out, best_model,)
-
-    def make_image_tensor(self, outputs, i=0):
-        import numpy as np
-        out_tensor = outputs[i]
-        # out tensor is flat
-        # reshape it based on its square root
-        side = int(out_tensor.shape[0] ** .5)
-        out_tensor = out_tensor.reshape(side, side, -1)
-        # out tensor is h,w,c float32 0 to 1
-        out_tensor = out_tensor.cpu()
-        # need 3 channels for PIL
-        out_tensor = out_tensor.repeat(1, 1, 3)
-        out_tensor = out_tensor.detach().numpy()
-        out_tensor = np.clip(out_tensor, 0, 1)
-        out_tensor = (out_tensor * 255).astype(np.uint8)
-        return out_tensor
-
-
-@ETK_pytorch_base
-class TensorsToDataset:
-    """
-    allows users to convert a tensor to a dataset
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "input_data": ("TORCH_TENSOR",),  # The input data to perform inference on
-                "labels": ("TORCH_TENSOR",),  # The input data to perform inference on
-            },
-            "optional": {
-                "move to device": (["cuda", "cpu"], {"default": "cpu"}),
-
-            }}
-
-    RETURN_TYPES = ("TORCH_DATASET",)
-    FUNCTION = "to_dataset"
-
-    def to_dataset(self, input_data, labels, **kwargs):
-        # perform inference on the input data or dataset using the model
-        # and return the output
-        if input_data.is_leaf == True:
-            input_data.requires_grad = True
-
-        try:
-            if labels.is_leaf == True:
-                labels.requires_grad = True
-        except RuntimeError as e:
-            if "floating point and complex dtype" in str(e):
-                pass
-            else:
-                raise e
-
-        move_to_device = kwargs.get("move to device", "cpu")
-        if move_to_device == "cuda":
-            device_to_use = torch.device("cuda")
-        else:
-            device_to_use = torch.device("cpu")
-
-        input_data = input_data.to(device_to_use)
-        labels = labels.to(device_to_use)
-
-        output = torch.utils.data.TensorDataset(input_data, labels)
-        return (output,)
-
-
-@ETK_pytorch_base
-class DatasetToDataloader:
-    """
-    allows users to convert a dataset to a dataloader
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "dataset": ("TORCH_DATASET",),  # The input data to perform inference on
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_DATALOADER",)
-    FUNCTION = "to_dataloader"
-
-    def to_dataloader(self, dataset):
-        # perform inference on the input data or dataset using the model
-        # and return the output
-        output = torch.utils.data.DataLoader(dataset)
-        return (output,)
-
-
-@ETK_pytorch_base
-class ComfyUIImageToPytorchTENSOR:
-    """
-    this just renames the object for compatibility with comfyui->pytorch
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_TENSOR", "TORCH_TENSOR",)
-    RETURN_NAMES = ("b,h,w,c", "b,h,w,mean(c)",)
-    FUNCTION = "to_tensor"
-
-    def to_tensor(self, image):
-        out1 = torch.tensor(image)
-        out2 = torch.tensor(image).mean(dim=3)
-        return (out1, out2,)
-
-
-@ETK_pytorch_base
-class ListToTensor:
-    """
-    this just renames the object for compatibility with comfyui->pytorch
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-
-        return {
-            "required": {
-                "list": ("LIST",),
-            },
-            "optional": {
-                "dtype": (valid_dtypes_str,),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_TENSOR",)
-
-    FUNCTION = "to_tensor"
-
-    def to_tensor(self, list, dtype="float"):
-        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        output = torch.tensor(list)
-        dts = dtype
-        dto_i = valid_dtypes_str.index(dts)
-        dto = valid_dtypes[dto_i]
-        output = output.to(dto)
-        return (output,)
-
-
-@ETK_pytorch_base
-class Activation:
-    """
-    uses values in torch.nn.modules.activation to create an activation function
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        activation_str_names = [i for i in torch.nn.modules.activation.__dict__.keys() if i[0] != "_"]
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-                "activation": (activation_str_names,),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL",)
-    FUNCTION = "activation"
-
-    def activation(self, model, activation):
-        act = getattr(torch.nn.modules.activation, activation)()
-        model = model.insert(len(model), act)
-        return (model,)
-
-
-@ETK_pytorch_base
-class AddReshapeLayer:
-    """
-    Adds a reshape layer to the model.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-                "shape": ("STRING", {"default": "1, -1"}),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL",)
-    FUNCTION = "add_reshape_layer"
-    CATEGORY = "model"
-
-    def add_reshape_layer(self, model, shape):
-        import torch.nn as nn
-        t = tuple([int(i) for i in shape.split(",")])
-
-        # Create the new reshape layer
-        reshape_layer_f = nn.Flatten(0)
-        reshape_layer_u = nn.Unflatten(0, t)
-
-        # Reconstruct the nn.Sequential model to include the new layer
-        if isinstance(model, nn.Sequential):
-            model.insert(len(model), reshape_layer_f)
-            model.insert(len(model), reshape_layer_u)
-        else:
-            raise TypeError("The provided model is not an nn.Sequential model.")
-
-        # Returning the modified model
-        return (model,)
-
-
-@ETK_pytorch_base
-class AddTransformerLayer:
-    """
-    Adds a transformer encoder layer to the model.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-                "input_features": ("INT", {"min": 1, "max": 2 ** 24}),
-                "num_heads": ("INT", {"min": 1}),
-                "feedforward_dim": ("INT", {"min": 1}),
-                "dropout": ("FLOAT", {"min": 0.0, "max": 1.0, "default": 0.1}),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL",)
-    FUNCTION = "add_transformer_layer"
-    CATEGORY = "model"
-
-    def add_transformer_layer(self, model, input_features, num_heads, feedforward_dim, dropout=0.1):
-        import torch.nn as nn
-
-        # Create the new transformer encoder layer
-        # input_features: The number of expected features in the input
-        # num_heads: The number of heads in the multihead attention mechanism
-        # feedforward_dim: The dimension of the feedforward network model, more specifically the hidden layer
-        # this will have the effect of increasing the model's capacity, and as far as output shape is concerned,
-        # it will be the same as the input shape
-        # dropout: The dropout probability (default: 0.1)
-        transformer_layer = nn.TransformerEncoderLayer(
-            d_model=input_features,
-            nhead=num_heads,
-            dim_feedforward=feedforward_dim,
-            dropout=dropout
-        )
-
-        # Check if the provided model is an nn.Sequential model
-        if isinstance(model, nn.Sequential):
-            # Add the transformer layer to the end of the model
-            model.insert(len(model), transformer_layer)
-        else:
-            raise TypeError("The provided model is not an nn.Sequential model.")
-
-        # Return the modified model
-        return (model,)
-
-
-@ETK_pytorch_base
-class PyTorchToDevice:
-    """
-    moves a pytorch object to a device
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "device": (["cuda", "cpu"], {"default": "cpu"}),
-            },
-            "optional": {
-                "model": ("TORCH_MODEL",),
-                "tensor": ("TORCH_TENSOR",),
-
-            }}
-
-    RETURN_TYPES = ("TORCH_MODEL", "TORCH_TENSOR",)
-    FUNCTION = "to_device"
-
-    def to_device(self, device, model=None, tensor=None):
-        if device == "cuda":
-            device_to_use = torch.device("cuda")
-        else:
-            device_to_use = torch.device("cpu")
-
-        model_out = None
-        tensor_out = None
-
-        if model is not None:
-            model_out = model.to(device_to_use)
-        if tensor is not None:
-            tensor_out = tensor.to(device_to_use)
-
-        return (model_out, tensor_out,)
-
-
-import torch
-import torch.nn as nn
-
-
-@ETK_pytorch_base
-class ExtractLayersAsModel:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-                "start_idx": ("INT", {"min": 0}),
-                "end_idx": ("INT", {"min": 0}),
-                "freeze": (["True", "False"], {"default": "False"}),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL", "STRING",)
-    RETURN_NAMES = ("model", "shapes_str",)
-    FUNCTION = "extract_layers"
-    CATEGORY = "model"
-
-    def extract_layers(self, model, start_idx, end_idx, freeze=False):
-        if freeze == "True":
-            freeze = True
-        else:
-            freeze = False
-
-        # Ensure the model is a Sequential model
-        if not isinstance(model, nn.Sequential):
-            raise TypeError("The provided model is not a nn.Sequential model.")
-
-        # Check the indices validity
-        if start_idx < 0 or end_idx < start_idx or end_idx >= len(model):
-            raise ValueError("Invalid start or end index.")
-
-        # Extracting the desired layers
-        extracted_layers = nn.Sequential(*list(model.children())[start_idx:end_idx + 1])
-
-        # get a tuple of all the in out shapes
-        shapes = []
-        for i in range(start_idx, end_idx + 1):
-            # check if it has in_features
-            if hasattr(model[i], "in_features"):
-                shapes.append(model[i].in_features)
-            # check if it has out_features
-            if hasattr(model[i], "out_features"):
-                shapes.append(model[i].out_features)
-
-        shapes_str = str(shapes)
-
-        # to freeze or not to freeze
-        if freeze:
-            for param in extracted_layers.parameters():
-                param.requires_grad = False
-
-        # Returning the new Sequential model
-        return (extracted_layers, shapes_str,)
-
-
-@ETK_pytorch_base
-class AddModelAsLayer:
-    """
-    given a model main and model addition adds the model addition to the end of the model main
-
-    """
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model_main": ("TORCH_MODEL",),
-                "model_addition": ("TORCH_MODEL",),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL",)
-    FUNCTION = "add_model"
-    CATEGORY = "model"
-
-    def add_model(self, model_main, model_addition):
-        # Ensure both models are Sequential models
-        if not isinstance(model_main, nn.Sequential):
-            raise TypeError("model_main is not a nn.Sequential model.")
-        if not isinstance(model_addition, nn.Sequential):
-            raise TypeError("model_addition is not a nn.Sequential model.")
-
-        # Adding each layer of model_addition to model_main
-        for layer in model_addition.children():
-            model_main.add_module(f"added_layer_{len(model_main)}", layer)
-
-        # Returning the updated model_main
-        return (model_main,)
-
-
-@ETK_pytorch_base
-class RandomTensor:
-    """
-    creates a random tensor of a given shape and dtype and initialization method
-    """
-
-    @classmethod
-    def INPUT_TYPES(s):
-        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        return {
-            "required": {
-                "shape": ("STRING", {"default": "(1,1)"}),
-            },
-            "optional": {
-                "dtype": (valid_dtypes_str,),
-                "init_method": (
-                    ["rand", "randn", "randint", "randint_like", "rand_like", "randn_like"], {"default": "rand"}),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_TENSOR",)
-    FUNCTION = "random_tensor"
-    CATEGORY = "tensor"
-
-    def random_tensor(self, shape, dtype="float", init_method="rand"):
-        valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        dts = dtype
-        dto_i = valid_dtypes_str.index(dts)
-        dto = valid_dtypes[dto_i]
-
-        # do not eval shape, first remove enclosing parens
-        shape = shape[1:-1]
-        # now split on comma
-        shape = shape.split(",")
-        # now convert to int
-        shape = [int(s) for s in shape]
-        # now convert to tuple
-        shape = tuple(shape)
-
-        if init_method == "rand":
-            output = torch.rand(shape, dtype=dto)
-        elif init_method == "randn":
-            output = torch.randn(shape, dtype=dto)
-        elif init_method == "randint":
-            output = torch.randint(shape, dtype=dto)
-        elif init_method == "randint_like":
-            output = torch.randint_like(shape, dtype=dto)
-        elif init_method == "rand_like":
-            output = torch.rand_like(shape, dtype=dto)
-        elif init_method == "randn_like":
-            output = torch.randn_like(shape, dtype=dto)
-        return (output,)
-
-
-@ETK_pytorch_base
-class GridSearchTraining:
-    """
-    Performs grid search training using the TrainModel class.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        default_param_grid = json.dumps({
-            'epochs': [1, 2],
-            'batch_size': [32, 64],
-            'loss_function': ['MSELoss', 'CrossEntropyLoss']
-        })
-
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-                "param_grid": ("STRING", {"default": default_param_grid}),  # String representation of param_grid
-            },
-            "optional": {
-                "dataset": ("TORCH_DATASET",),
-                "features tensor": ("TORCH_TENSOR",),
-                "labels tensor": ("TORCH_TENSOR",),
-                # Other optional parameters can be added here
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL", "DICT", "LIST")
-    RETURN_NAMES = ("best_model", "best_params", "all_metrics")
-    FUNCTION = "grid_search_train"
-
-    def grid_search_train(self, model, param_grid, **kwargs):
-        """
-        Trains the model using grid search.
-        """
-        from itertools import product
-
-        # Parse the param_grid from string to dictionary
-        param_grid_dict = json.loads(param_grid)
-
-        best_model = None
-        best_params = None
-        all_metrics = []
-
-        # Generate all combinations of parameters
-        param_combinations = list(product(*param_grid_dict.values()))
-
-        for params in param_combinations:
-            # Map the parameters to the appropriate keys
-            train_kwargs = dict(zip(param_grid_dict.keys(), params))
-            # Merge with other kwargs (like dataset or tensors)
-            train_kwargs.update(kwargs)
-
-            print(f"Training with parameters: {train_kwargs}")
-
-            # Create a new instance of TrainModel and train the model
-            trainer = TrainModel()
-            trained_model, metrics, _ = trainer.train(model, **train_kwargs)
-
-            # Store metrics for each combination
-            all_metrics.append(metrics)
-
-            # Determine the best model and parameters (implement your own logic)
-            if best_model is None or self.is_better(metrics, all_metrics):
-                best_model = trained_model
-                best_params = train_kwargs
-
-        return best_model, best_params, all_metrics
-
-    @staticmethod
-    def is_better(current_metrics, all_metrics):
-        """
-        Determines if the current model is better than the previous models.
-        Implement your own logic here based on the metrics.
-        """
-        # Example comparison logic, adjust as needed
-        return current_metrics[-1] < min(all_metrics, key=lambda m: m[-1])[-1]
-
-
-@ETK_pytorch_base
-class SaveTorchTensor:
-    """
-    Saves a torch tensor to a file using torch.save which has the required parameters of obj and f
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "tensor": ("TORCH_TENSOR", {"default": None}),
-                "file": ("STRING", {"default": "/somewhere/some.pt"}),
-            },
-
-        }
-
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "save_torch_tensor"
-    OUTPUT_NODE = True
-
-    def save_torch_tensor(self, tensor, file):
-        import torch
-        """
-        Saves a torch tensor to a file
-        """
-        torch.save(tensor, file)
-        return (file,)
-
-
-@ETK_pytorch_base
-class LoadTorchTensor:
-    """
-    Loads a torch tensor from a file using torch.load
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "file": ("STRING", {"default": "/somewhere/some.pt"}),
-            },
-
-        }
-
-    RETURN_TYPES = ("TORCH_TENSOR",)
-    FUNCTION = "load_torch_tensor"
-
-    def load_torch_tensor(self, file):
-        import torch
-        """
-        Loads a torch tensor from a file
-        """
-        return (torch.load(file),)
-
-
-@ETK_pytorch_base
-class FuncModifyModel:
-    """
-    allows users to modify a model using a function
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),  # The input data to perform inference on
-                "function": ("STRING", {"default": "model", "multiline": True}),
-            }
-        }
-
-    RETURN_TYPES = ("TORCH_MODEL",)
-    FUNCTION = "modify_model"
-
-    def modify_model(self, model, function):
-        from copy import deepcopy
-
-        old_model = deepcopy(model)
-        exec(function)
-        new_model = model
-        if old_model == new_model:
-            raise ValueError("The model was not modified.")
-
-        return (new_model,)
-
-
-@ETK_pytorch_base
-class PlotSeriesString:
-    """
-    Plots a series of strings
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "series": ("STRING", {"default": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10"}),
-            },
-            "optional": {
-                "title": ("STRING", {"default": "Series Plot"}),
-                "xlabel": ("STRING", {"default": "X-axis"}),
-                "ylabel": ("STRING", {"default": "Y-axis"}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "plot_series_string"
-    OUTPUT_NODE = True
-
-    def plot_series_string(self, series, title="Series Plot", xlabel="X-axis", ylabel="Y-axis"):
-        """
-        uses matplotlib to create a plot of a series of float values of a string (seperated by newlines)
-        saves that plot to the disk then reads it back into memory as a pytorch tensor of float32 (B,H,W,C)
-        """
-        import matplotlib.pyplot as plt
-        import numpy as np
-        import io
-        import PIL
-        from PIL import Image
-        import torch
-
-        if isinstance(series, str):
-            # split the series on newlines
-            series = series.split("\n")
-        elif isinstance(series, list):
-            pass
-        else:
-            raise ValueError("series must be a string or a list")
-
-        # convert to float
-        series = [float(s) for s in series]
-        # create the plot
-        plt.plot(series)
-        plt.title(title)
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
-        # save the plot to a buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        # read the buffer into a PIL image
-        im = Image.open(buf)
-        # convert the PIL image to a numpy array
-        im = np.array(im)
-
-        # convert the numpy array to a tensor
-        im = torch.tensor(im)
-
-        # now the im will have a shape of (H,W,C) and a dtype of uint8
-        # we need to convert it to (B,H,W,C) and float32
-        # add a batch dimension
-
-        im = im.unsqueeze(0)
-        # convert to float32
-        im = im.float()
-        # correct the data range
-        im = im / 255.0
-
-        # close the plot
-        plt.close()
-        buf.close()
-
-        return (im,)
-
-
-@ETK_pytorch_base
-class DescribeModelInputNode:
-    """
-    Outputs a detailed description of the input(s) expected by a given PyTorch model.
-    """
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model": ("TORCH_MODEL",),
-            }
-        }
-
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "describe_model_input"
-    CATEGORY = "model"
-
-    def describe_model_input(self, model):
-        import torch.nn as nn
-        desc = []
-        # Try to find the first Linear/Conv layer or input signature
-        for layer in model.children():
-            if hasattr(layer, 'in_features'):
-                desc.append(f"First Linear layer: in_features={layer.in_features}, dtype={layer.weight.dtype}")
-                break
-            elif hasattr(layer, 'in_channels'):
-                desc.append(f"First Conv layer: in_channels={layer.in_channels}, kernel_size={getattr(layer, 'kernel_size', '?')}, dtype={layer.weight.dtype}")
-                break
-        else:
-            # Fallback: try to infer from forward signature
-            try:
-                sig = str(model.forward.__annotations__)
-                desc.append(f"Model forward signature: {sig}")
-            except Exception:
-                desc.append("Could not determine input details from model layers or signature.")
-        # Optionally, add more info (e.g., expected input shape if available)
-        return ("\n".join(desc),)
-
-
-if __name__ == "__main__":
-    import json
-
-    # Example usage
-    param_grid_str = json.dumps({
-        'epochs': [1, 2],
-        'batch_size': [32, 64],
-        'loss_function': ['MSELoss', 'CrossEntropyLoss']
-        # Add other hyperparameters and their ranges here
-    })
-
-    # Creating a synthetic dataset
-    num_samples = 100
-    num_features = 10
-    num_classes = 2
-    synthetic_features = torch.randn(num_samples, num_features)
-    synthetic_labels = torch.randint(0, num_classes, (num_samples,))
-    # needs one hot encoding
-    synthetic_labels = torch.nn.functional.one_hot(synthetic_labels, num_classes=num_classes)
-    # needs to be float
-    synthetic_labels = synthetic_labels.float()
-
-    # Define the model
-    model = nn.Sequential(
-        nn.Linear(num_features, 5),
-        nn.ReLU(),
-        nn.Linear(5, num_classes),
-        nn.Softmax(dim=1)
-    )
-
-    # Instantiate the GridSearchTraining class
-    grid_search = GridSearchTraining()
-
-    # Run grid search training
-    best_model, best_params, all_metrics = grid_search.grid_search_train(
-        model,
-        param_grid_str,
-        dataset=torch.utils.data.TensorDataset(synthetic_features, synthetic_labels)
-    )
-
-    print("Best parameters:", best_params)
