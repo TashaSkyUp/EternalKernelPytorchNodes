@@ -909,14 +909,13 @@ class ListToTensor:
         }
     RETURN_TYPES = ("TORCH_TENSOR",)
     FUNCTION = "to_tensor"
-    def to_tensor(self, list, dtype="float"):
+    def to_tensor(self, list, dtype=str(torch.float32)):
         valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
         valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        output = torch.tensor(list)
-        dts = dtype
-        dto_i = valid_dtypes_str.index(dts)
-        dto = valid_dtypes[dto_i]
-        output = output.to(dto)
+        if dtype not in valid_dtypes_str:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+        dto = valid_dtypes[valid_dtypes_str.index(dtype)]
+        output = torch.tensor(list, dtype=dto)
         return (output,)
 
 @ETK_pytorch_base
@@ -1109,28 +1108,34 @@ class RandomTensor:
     RETURN_TYPES = ("TORCH_TENSOR",)
     FUNCTION = "random_tensor"
     CATEGORY = "tensor"
-    def random_tensor(self, shape, dtype="float", init_method="rand"):
+    def random_tensor(self, shape, dtype=str(torch.float32), init_method="rand"):
         valid_dtypes_str = [str(dt) for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
         valid_dtypes = [dt for k, dt in torch.__dict__.items() if isinstance(dt, torch.dtype)]
-        dts = dtype
-        dto_i = valid_dtypes_str.index(dts)
-        dto = valid_dtypes[dto_i]
+        if dtype not in valid_dtypes_str:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+        dto = valid_dtypes[valid_dtypes_str.index(dtype)]
+
         shape = shape[1:-1]
-        shape = shape.split(",")
-        shape = [int(s) for s in shape]
+        shape = [int(s) for s in shape.split(",")]
         shape = tuple(shape)
+
         if init_method == "rand":
             output = torch.rand(shape, dtype=dto)
         elif init_method == "randn":
             output = torch.randn(shape, dtype=dto)
         elif init_method == "randint":
-            output = torch.randint(shape, dtype=dto)
+            output = torch.randint(0, 100, shape, dtype=dto)
         elif init_method == "randint_like":
-            output = torch.randint_like(shape, dtype=dto)
+            temp = torch.empty(shape, dtype=dto)
+            output = torch.randint_like(temp, 0, 100)
         elif init_method == "rand_like":
-            output = torch.rand_like(shape, dtype=dto)
+            temp = torch.empty(shape, dtype=dto)
+            output = torch.rand_like(temp)
         elif init_method == "randn_like":
-            output = torch.randn_like(shape, dtype=dto)
+            temp = torch.empty(shape, dtype=dto)
+            output = torch.randn_like(temp)
+        else:
+            raise ValueError(f"Unsupported init_method: {init_method}")
         return (output,)
 
 @ETK_pytorch_base
