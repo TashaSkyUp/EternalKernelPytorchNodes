@@ -1,8 +1,8 @@
 skip_login_for_local: true
 tmp_dir: comfy_path/temp
 gitio:
-  COTRF: https://github.com/Hopping-Mad-Games/COTRF.git
-  StSq: https://github.com/story-squad/GDE_Graph_IO.git
+  COTRF: https://github.com/Hopping-Mad-Games/COTRF
+  StSq: https://github.com/story-squad/GDE_Graph_IO
   HMG: https://github.com/TashaSkyUp/HMG_GDE_GITIO
   base: ./data/gitio
 tesseract_location: /usr/bin/tesseract
