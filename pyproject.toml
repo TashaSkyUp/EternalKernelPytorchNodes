@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/TashaSkyUp/EternalKernelPyTorchNodes"
+Repository = "https://github.com/TashaSkyUp/EternalKernelPytorchNodes"
 
 [tool.comfy]
 PublisherId = "hmg"
