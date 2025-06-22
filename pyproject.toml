@@ -5,7 +5,7 @@ version = "1.0.0"
 license = "MIT"
 dependencies = [
     "torch>=2.0.0",
-    "torchvision>=0.15.0", 
+    "torchvision>=0.15.0",
     "torchaudio>=2.0.0",
     "numpy>=1.24.0",
     "scipy>=1.11.0",
@@ -23,6 +23,6 @@ dependencies = [
 Repository = "https://github.com/TashaSkyUp/EternalKernelPyTorchNodes"
 
 [tool.comfy]
-PublisherId = "tashaskyup"
+PublisherId = "hmg"
 DisplayName = "EternalKernel PyTorch Nodes"
-Icon = "https://avatars.githubusercontent.com/u/TashaSkyUp?s=48&v=4"
+Icon = "https://avatars.githubusercontent.com/u/154278219?s=48&v=4"
