@@ -1,68 +1,24 @@
-#git+https://github.com/facebookresearch/audiocraft.git
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-oauth2client
-httplib2
-GitPython
-librosa
-moviepy
-openai-whisper
-addict
-diffusers
-ffmpeg-python
-imageio-ffmpeg
+# Core PyTorch dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
-# core deps for xtts
-numpy==1.22.0;python_version<="3.10"
-numpy>=1.24.3;python_version>"3.10"
-cython>=0.29.30
-scipy>=1.11.2
-#torch>=2.1
-torchaudio
-soundfile>=0.12.0
-librosa>=0.10.0
+# Essential ML dependencies
+numpy>=1.24.0
+scipy>=1.11.0
 scikit-learn>=1.3.0
-numba>=0.57.0;python_version>="3.9"
-inflect>=5.6.0
-tqdm>=4.64.1
-anyascii>=0.3.0
-pyyaml>=6.0
-fsspec>=2023.6.0 # <= 2023.9.1 makes aux tests fail
-aiohttp>=3.8.1
+
+# Utility dependencies
+tqdm>=4.64.0
+pyyaml>=6.0.0
 packaging>=23.1
-mutagen==1.47.0
 
-
-# deps for inference
-pysbd>=0.3.4
-
-# deps for training
-matplotlib>=3.7.0
-
-# coqui stack
-# trainer
-
-# config management
+# For configuration management
 coqpit>=0.0.16
 
-
-#deps for tortoise
-einops>=0.6.0
-transformers>=4.33.0
-#deps for bark
-encodec>=0.1.1
-
-# deps for XTTS
-unidecode>=1.3.2
-num2words
-# spacy[ja]>=3
-#TTS
-coqui-tts[languages] == 0.24.2
-
-#deps for ocr
-pytesseract
-scikit-image
+# For data handling
 h5py
 
-opencv-python
+# Optional but commonly used
+transformers>=4.33.0
+einops>=0.6.0
