@@ -1,26 +1,26 @@
-import yaml
-
-
-def read_yaml(file_path,config_replaclemts):
-    with open(file_path, 'r') as file:
-        data = yaml.safe_load(file)
-    for key, value in data.items():
-        if isinstance(value, str):
-            for key2, value2 in config_replaclemts.items():
-                if key2 in value:
-                    data[key] = value.replace(key2, value2)
-
-    return data
-
-
 import os
 
-this_file_path = os.path.dirname(os.path.realpath(__file__))
-# two directories up
-comfy_path = os.path.dirname(os.path.dirname(this_file_path))
-config_replacements = {
-    'comfy_path': comfy_path
-}
-config_file_path = os.path.join(this_file_path, "config.yaml")
-# Load the YAML data when the module is imported
-config_settings = read_yaml(config_file_path, config_replacements)
+if os.environ.get("UNIT_TEST"):
+    # Avoid optional dependency during tests
+    config_settings = {}
+else:
+    import yaml
+
+    def read_yaml(file_path, config_replaclemts):
+        with open(file_path, "r") as file:
+            data = yaml.safe_load(file)
+        for key, value in data.items():
+            if isinstance(value, str):
+                for key2, value2 in config_replaclemts.items():
+                    if key2 in value:
+                        data[key] = value.replace(key2, value2)
+
+        return data
+
+    this_file_path = os.path.dirname(os.path.realpath(__file__))
+    # two directories up
+    comfy_path = os.path.dirname(os.path.dirname(this_file_path))
+    config_replacements = {"comfy_path": comfy_path}
+    config_file_path = os.path.join(this_file_path, "config.yaml")
+    # Load the YAML data when the module is imported
+    config_settings = read_yaml(config_file_path, config_replacements)
