@@ -23,7 +23,9 @@ def test_TorchVisionTransformStringParser():
     transforms, name = ret
     assert name == "test"
     assert transforms[0][0] == "Resize"
+    assert transforms[0][1] == ["64", "64"]
     assert transforms[1][0] == "GaussianBlur"
+    assert transforms[1][1] == ["1"]
 
 def test_TorchVisionTransformNode():
     node1 = TorchVisionTransformCompositionList()
