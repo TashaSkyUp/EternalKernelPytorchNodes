@@ -7,7 +7,7 @@ import tempfile
 import pytest
 import torch
 from PIL import Image
-from ..video import AddFramesToVideoFolder, VideoFolderProvider, VideoDefinitionProvider
+from ..audio_video_folder import AddFramesToVideoFolder, VideoFolderProvider, VideoDefinitionProvider
 
 os.environ["ETERNAL_KERNEL_LITEGRAPH_NODES_TEST"] = "True"
 
@@ -143,7 +143,7 @@ class TestTemporalOpticalFlowSmoothing(TestCase):
         # check the file generation and video play
 
 
-from ..video import AddFramesToVideoFolder, VideoFolderProvider, VideoDefinitionProvider
+from ..audio_video_folder import AddFramesToVideoFolder, VideoFolderProvider, VideoDefinitionProvider
 
 
 @pytest.fixture(scope="function")
