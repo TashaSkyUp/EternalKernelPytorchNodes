@@ -1345,7 +1345,7 @@ class AddDropoutLayer:
     CATEGORY = "model"
 
     def add_dropout_layer(self, model, p=0.5, inplace="False"):
-        inplace = True if inplace in (True, "True") else False
+        inplace = inplace == "True"
         layer = nn.Dropout(p=p, inplace=inplace)
         if isinstance(model, nn.Sequential):
             model.insert(len(model), layer)
