@@ -1,3 +1,11 @@
+"""
+@title: EternalKernel PyTorch Nodes
+@nickname: EternalKernel
+@description: Comprehensive PyTorch nodes for ComfyUI - Neural network training, inference, and ML workflows with 35+ specialized nodes
+"""
+
+# Original content follows
+
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 WEB_DIRECTORY = "./web"

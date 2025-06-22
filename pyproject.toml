@@ -1,0 +1,28 @@
+[project]
+name = "pytorch-nodes"
+description = "Comprehensive PyTorch nodes for ComfyUI - Neural network training, inference, and ML workflows"
+version = "1.0.0"
+license = "MIT"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0", 
+    "torchaudio>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "scikit-learn>=1.3.0",
+    "tqdm>=4.64.0",
+    "pyyaml>=6.0.0",
+    "packaging>=23.1",
+    "coqpit>=0.0.16",
+    "h5py",
+    "transformers>=4.33.0",
+    "einops>=0.6.0"
+]
+
+[project.urls]
+Repository = "https://github.com/TashaSkyUp/EternalKernelPyTorchNodes"
+
+[tool.comfy]
+PublisherId = "tashaskyup"
+DisplayName = "EternalKernel PyTorch Nodes"
+Icon = "https://avatars.githubusercontent.com/u/TashaSkyUp?s=48&v=4"
