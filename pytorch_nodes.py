@@ -1296,3 +1296,84 @@ class PlotSeriesString:
         buf.close()
         return (im,)
 
+
+@ETK_pytorch_base
+class AddBatchNormLayer:
+    """Adds a BatchNorm layer to an ``nn.Sequential`` model."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "num_features": ("INT", {"min": 1}),
+                "one_d": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_batchnorm_layer"
+    CATEGORY = "model"
+
+    def add_batchnorm_layer(self, model, num_features, one_d=True):
+        layer = nn.BatchNorm1d(num_features) if one_d else nn.BatchNorm2d(num_features)
+        if isinstance(model, nn.Sequential):
+            model.insert(len(model), layer)
+        else:
+            raise TypeError("The provided model is not a nn.Sequential model.")
+        return (model,)
+
+
+@ETK_pytorch_base
+class AddDropoutLayer:
+    """Adds a Dropout layer to an ``nn.Sequential`` model."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "p": ("FLOAT", {"min": 0.0, "max": 1.0, "default": 0.5}),
+            },
+            "optional": {
+                "inplace": (["True", "False"], {"default": "False"}),
+            },
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "add_dropout_layer"
+    CATEGORY = "model"
+
+    def add_dropout_layer(self, model, p=0.5, inplace="False"):
+        inplace = inplace == "True"
+        layer = nn.Dropout(p=p, inplace=inplace)
+        if isinstance(model, nn.Sequential):
+            model.insert(len(model), layer)
+        else:
+            raise TypeError("The provided model is not a nn.Sequential model.")
+        return (model,)
+
+
+@ETK_pytorch_base
+class SetModelTrainable:
+    """Sets ``requires_grad`` for all parameters of a model."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("TORCH_MODEL",),
+                "requires_grad": (["True", "False"], {"default": "False"}),
+            }
+        }
+
+    RETURN_TYPES = ("TORCH_MODEL",)
+    FUNCTION = "set_trainable"
+    CATEGORY = "model"
+
+    def set_trainable(self, model, requires_grad="False"):
+        flag = True if requires_grad in (True, "True") else False
+        for param in model.parameters():
+            param.requires_grad = flag
+        return (model,)
+

@@ -36,6 +36,9 @@ from custom_nodes.EternalKernelLiteGraphNodes.pytorch_nodes import (
     FuncModifyModel,
     PlotSeriesString,
     GridSearchTraining,
+    AddBatchNormLayer,
+    AddDropoutLayer,
+    SetModelTrainable,
 )
 
 
@@ -318,3 +321,26 @@ def test_grid_search_training(monkeypatch):
     best_model, best_params, metrics = node.grid_search_train(model, param_grid)
     assert best_params["epochs"] == 1
     assert len(metrics) == 2
+
+
+def test_add_batchnorm_layer():
+    model = nn.Sequential(nn.Linear(4, 4))
+    node = AddBatchNormLayer()
+    out_model, = node.add_batchnorm_layer(model, 4, True)
+    assert isinstance(out_model[-1], nn.BatchNorm1d)
+
+
+def test_add_dropout_layer():
+    model = nn.Sequential(nn.Linear(4, 4))
+    node = AddDropoutLayer()
+    out_model, = node.add_dropout_layer(model, 0.3)
+    assert isinstance(out_model[-1], nn.Dropout)
+
+
+def test_set_model_trainable():
+    model = nn.Sequential(nn.Linear(1, 1))
+    node = SetModelTrainable()
+    frozen, = node.set_trainable(model, "False")
+    assert all(not p.requires_grad for p in frozen.parameters())
+    unfrozen, = node.set_trainable(frozen, "True")
+    assert all(p.requires_grad for p in unfrozen.parameters())
