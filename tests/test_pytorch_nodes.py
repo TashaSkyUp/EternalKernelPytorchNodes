@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from unittest import mock
 
+import json
 from custom_nodes.EternalKernelLiteGraphNodes.pytorch_nodes import (
     PyTorchDatasetDownloader,
     AddLinearLayerNode,
@@ -34,6 +35,7 @@ from custom_nodes.EternalKernelLiteGraphNodes.pytorch_nodes import (
     LoadTorchTensor,
     FuncModifyModel,
     PlotSeriesString,
+    GridSearchTraining,
 )
 
 
@@ -278,3 +280,41 @@ def test_plot_series_string():
     sys.modules['PIL'].Image = types.SimpleNamespace(open=lambda buf: [[1]])
     img, = node.plot_series_string("1\n2\n3")
     assert img.shape[1] > 0
+
+
+def test_add_conv_layer_params():
+    model = nn.Sequential()
+    node = AddConvLayer()
+    out_model, = node.add_conv_layer(
+        model,
+        False,
+        1,
+        1,
+        3,
+        1,
+        "(0,0)",
+        bias=False,
+        initialization="xavier_uniform",
+        dtype="float64",
+    )
+    conv = out_model[-1]
+    assert isinstance(conv, nn.Conv2d)
+    assert conv.bias is None
+    assert conv.weight.dtype == torch.float64
+
+
+def test_grid_search_training(monkeypatch):
+    model = nn.Sequential(nn.Linear(1, 1))
+
+    def fake_train(self, model, **kwargs):
+        epochs = kwargs.get("epochs", 1)
+        metric = 1.0 / epochs
+        return model, [metric], model
+
+    monkeypatch.setattr(TrainModel, "train", fake_train)
+
+    node = GridSearchTraining()
+    param_grid = json.dumps({"epochs": [1, 2]})
+    best_model, best_params, metrics = node.grid_search_train(model, param_grid)
+    assert best_params["epochs"] == 1
+    assert len(metrics) == 2
