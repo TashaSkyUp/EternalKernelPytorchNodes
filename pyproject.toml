@@ -2,7 +2,7 @@
 name = "pytorch-nodes"
 description = "Comprehensive PyTorch nodes for ComfyUI - Neural network training, inference, and ML workflows"
 version = "1.0.0"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 dependencies = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
