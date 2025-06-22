@@ -1,45 +1,150 @@
 # EternalKernel PyTorch Nodes
 
-A specialized collection of PyTorch nodes for ComfyUI, focused on machine learning and neural network operations.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 
-## Overview
+A comprehensive collection of PyTorch nodes for ComfyUI, enabling advanced machine learning workflows with neural network training, inference, and data manipulation capabilities.
 
-This repository contains PyTorch-specific nodes that were extracted from the main EternalKernelLiteGraphNodes project. It provides a clean, focused collection of PyTorch functionality for ComfyUI workflows.
+## 🌟 Features
 
-## Features
+### 🧠 Neural Network Components
+- **Layer Nodes**: Linear, Convolutional, BatchNorm, Dropout, Transformer layers
+- **Activation Functions**: ReLU, Sigmoid, Tanh, Softmax, and more
+- **Model Building**: Sequential model construction and layer extraction
+- **Architecture Tools**: Reshape, flatten, and tensor manipulation utilities
 
-- **PyTorch Integration**: Native PyTorch tensor operations and model handling
-- **Neural Network Nodes**: Various neural network layers and operations  
-- **Training Support**: Nodes for model training and optimization
-- **GPU Acceleration**: CUDA support for high-performance computing
+### 🚀 Training & Inference
+- **Model Training**: Full training loops with loss computation and optimization
+- **Grid Search**: Automated hyperparameter optimization
+- **Inference**: Efficient model inference with GPU acceleration
+- **Model Management**: Save/load PyTorch models with metadata
 
-## Installation
+### 📊 Data Handling
+- **Dataset Tools**: Download popular datasets (MNIST, CIFAR, etc.)
+- **Data Processing**: Split, shuffle, and batch your datasets
+- **Tensor Operations**: Slice, reshape, type conversion, and device management
+- **ComfyUI Integration**: Convert between ComfyUI images and PyTorch tensors
 
-1. Clone this repository into your ComfyUI custom_nodes directory:
+### 🔧 Advanced Features
+- **GPU Support**: Automatic CUDA acceleration when available
+- **Model Modification**: Extract layers, freeze/unfreeze parameters
+- **Visualization**: Plot training metrics and data distributions
+- **Flexible I/O**: Support for various data formats and tensor types
+
+## 📦 Installation
+
+### Quick Start
+1. Navigate to your ComfyUI custom nodes directory:
 ```bash
 cd ComfyUI/custom_nodes
-git clone <your-repo-url> EternalKernelPyTorchNodes
 ```
 
-2. Install the required dependencies:
+2. Clone this repository:
+```bash
+git clone https://github.com/TashaSkyUp/EternalKernelPyTorchNodes.git
+```
+
+3. Install dependencies:
 ```bash
 cd EternalKernelPyTorchNodes
 pip install -r requirements.txt
 ```
 
-## Contents
+4. Restart ComfyUI and the nodes will appear under the **ETK/pytorch** category.
 
-- `pytorch_nodes.py` - Main PyTorch node implementations
-- `tests/` - Comprehensive test suite for all nodes
-- `config.py` - Configuration settings
+### Requirements
+- **Python**: 3.8 or higher
+- **PyTorch**: 2.0+ (with CUDA support recommended)
+- **ComfyUI**: Latest version
+- **Dependencies**: See `requirements.txt` for full list
 
-## Requirements  
+## 🎯 Node Categories
 
-- Python 3.8+
-- PyTorch
-- ComfyUI
-- Additional dependencies listed in requirements.txt
+### Dataset & Data Processing
+- `PyTorchDatasetDownloader` - Download popular ML datasets
+- `DatasetSplitter` - Split datasets into train/test/validation
+- `TensorsToDataset` - Create datasets from tensor collections
+- `DatasetToDataloader` - Generate DataLoaders with batching
 
-## License
+### Neural Network Layers
+- `AddLinearLayerNode` - Fully connected layers
+- `AddConvLayer` - Convolutional layers with customizable parameters
+- `AddBatchNormLayer` - Batch normalization for stable training
+- `AddDropoutLayer` - Regularization through dropout
+- `AddTransformerLayer` - Modern attention-based layers
+- `AddReshapeLayer` - Dynamic tensor reshaping
 
-See LICENSE file for details.
+### Model Operations
+- `SequentialModelProvider` - Build sequential neural networks
+- `PyTorchInferenceNode` - Run inference on trained models
+- `TrainModel` - Complete training loops with optimization
+- `GridSearchTraining` - Automated hyperparameter tuning
+- `SaveModel` / `LoadModel` - Model persistence with metadata
+
+### Tensor Utilities
+- `FlattenTensor` - Flatten multi-dimensional tensors
+- `ReshapeTensor` - Reshape tensors to desired dimensions
+- `SliceTensor` - Extract tensor slices and subsets
+- `ChangeTensorType` - Convert between tensor data types
+- `PyTorchToDevice` - Move tensors between CPU/GPU
+- `RandomTensor` - Generate random tensors for testing
+
+### Advanced Tools
+- `ExtractLayersAsModel` - Extract sublayers as standalone models
+- `AddModelAsLayer` - Embed existing models as layers
+- `SetModelTrainable` - Freeze/unfreeze model parameters
+- `FuncModifyModel` - Apply custom functions to models
+- `PlotSeriesString` - Visualize training metrics
+
+## 🚀 Usage Examples
+
+### Basic Neural Network Training
+Create and train a neural network with just a few nodes:
+
+1. **Download Dataset** → **Split Data** → **Build Model** → **Train** → **Save**
+
+### Grid Search Optimization
+Automatically find the best hyperparameters for your model with the GridSearchTraining node.
+
+### ComfyUI Integration
+Seamlessly convert between ComfyUI images and PyTorch tensors for ML processing in your workflows.
+
+## 🧪 Testing
+
+Run the comprehensive test suite:
+```bash
+cd EternalKernelPyTorchNodes
+python -m pytest tests/ -v
+```
+
+Tests cover all node functionality, model training/inference, tensor operations, and GPU/CPU compatibility.
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+- Report bugs or issues
+- Suggest new features  
+- Submit pull requests
+- Improve documentation
+
+## 📋 Compatibility
+
+- **ComfyUI**: All recent versions
+- **OS**: Windows, macOS, Linux
+- **Hardware**: CPU and CUDA GPUs
+- **PyTorch**: 2.0+ (optimized for latest)
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+Built for the [ComfyUI](https://github.com/comfyanonymous/ComfyUI) community, powered by [PyTorch](https://pytorch.org/).
+
+---
+
+**Made with ❤️ for the ComfyUI and PyTorch communities**
+
+For support: [GitHub Issues](https://github.com/TashaSkyUp/EternalKernelPyTorchNodes/issues)
