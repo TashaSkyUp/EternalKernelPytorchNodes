@@ -60,6 +60,64 @@ class TorchVisionTransformCompositionList:
 
 
 @ETK_torchvision_base
+class TorchVisionTransformStringParser:
+    """Parses a newline separated list of torchvision transform calls.
+
+    Each line should be either ``TransformName`` or ``TransformName(arg1, arg2)``.
+    This node helps users quickly define a composition pipeline without having
+    to add a separate node for each transform.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        import inspect
+        import torchvision.transforms as transforms
+        import torch.nn as nn
+
+        # build default definition text listing all available transform
+        # classes and their constructor parameters for quick reference
+        lines = []
+        for name, obj in inspect.getmembers(transforms, inspect.isclass):
+            if obj.__module__.startswith("torchvision.transforms") and issubclass(obj, nn.Module):
+                sig = inspect.signature(obj.__init__)
+                params = [p for p in sig.parameters.values() if p.name != "self"]
+                p_names = ", ".join(p.name for p in params)
+                lines.append(f"{name}({p_names})")
+
+        default_def = "\n".join(lines)
+
+        return {
+            "required": {
+                "definition": ("STRING", {"default": default_def, "multiline": True}),
+                "name": ("STRING", {"default": "t_comp_00"}),
+            },
+        }
+
+    RETURN_TYPES = ("TV_COMPOSITION_LIST", "STRING")
+    RETURN_NAMES = ("transforms_list", "name")
+    FUNCTION = "compose"
+
+    def compose(self, definition, name):
+        import re
+
+        lines = [l.strip() for l in definition.splitlines() if l.strip()]
+        transforms = []
+        for line in lines:
+            m = re.match(r"(\w+)(?:\((.*)\))?", line)
+            if not m:
+                continue
+            t_name = m.group(1)
+            args_str = m.group(2)
+            if args_str:
+                args = [a.strip() for a in args_str.split(',') if a.strip()]
+            else:
+                args = None
+            transforms.append([t_name, args])
+
+        return (transforms, name,)
+
+
+@ETK_torchvision_base
 class TorchVisionTransformNode:
     """Provides the base class for torchvision transforms"""
 
@@ -67,14 +125,15 @@ class TorchVisionTransformNode:
     def INPUT_TYPES(cls):
         import torchvision.transforms as transforms
         import inspect
-        import torch
+        import torch.nn as nn
+
+        # gather torchvision transform classes for dropdown selection
         t_list = []
         c_list = []
-        for i in transforms.__dict__.values():
-            if "torchvision.transforms.transforms." in str(i):
-                nm = str(i).split(".")[-1][:-2]
-                t_list.append([nm, i])
-                c_list.append(nm)
+        for name, obj in inspect.getmembers(transforms, inspect.isclass):
+            if obj.__module__.startswith("torchvision.transforms") and issubclass(obj, nn.Module):
+                t_list.append([name, obj])
+                c_list.append(name)
 
         return {
             "required": {
@@ -156,17 +215,21 @@ class TorchVisionCallComposition:
         # create the transform composition list that will be used with transforms.Compose
         transform_composition = []
         for l_c_name, l_c_args in composition:
-            if c_name:
+            if l_c_name:
+                if l_c_args is None:
+                    l_c_args = []
                 transform_composition.append(getattr(torchvision.transforms, l_c_name)(*l_c_args))
 
         # now that the list is composed use it to create the compostion object
         transform_composition = torchvision.transforms.Compose(transform_composition)
 
-        # apply the transform to the tensor
-        # these transforms require b,c,h,w
-        # so then permute
-        tensor = tensor.permute(0, 3, 1, 2)
-        tensor = transform_composition(tensor)
+        # apply the transform to each item in the batch
+        # many torchvision transforms expect a single image tensor of shape C,H,W
+        tensor = tensor.permute(0, 3, 1, 2)  # B,C,H,W
+        out_list = []
+        for img in tensor:
+            out_list.append(transform_composition(img))
+        tensor = torch.stack(out_list, dim=0)
         tensor = tensor.permute(0, 2, 3, 1)
 
         return (tensor, tensor, transform_composition,)

@@ -1,7 +1,10 @@
 import pytest
-from ..torchvision_nodes import TorchVisionTransformCompositionList
-from ..torchvision_nodes import TorchVisionTransformNode
-from ..torchvision_nodes import TorchVisionCallComposition
+from ..torchvision_nodes import (
+    TorchVisionTransformCompositionList,
+    TorchVisionTransformStringParser,
+    TorchVisionTransformNode,
+    TorchVisionCallComposition,
+)
 
 
 # when testing set "UNIT_TEST" to true in the environment to avoid loading all of ComfyUI
@@ -12,6 +15,15 @@ def test_TorchVisionTransformCompositionList():
     ret = tvtcl_node.compose("test")
     ret = ret[0]
     assert ret is not None
+
+
+def test_TorchVisionTransformStringParser():
+    node = TorchVisionTransformStringParser()
+    ret = node.compose("Resize(64,64)\nGaussianBlur(1)", "test")
+    transforms, name = ret
+    assert name == "test"
+    assert transforms[0][0] == "Resize"
+    assert transforms[1][0] == "GaussianBlur"
 
 def test_TorchVisionTransformNode():
     node1 = TorchVisionTransformCompositionList()
